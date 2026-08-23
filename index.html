@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3d</title>
+<script src="karaoke-store.js"></script>
+<script src="karaoke-features.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<style>
+  :root { --ink:#1e293b; --muted:#64748b; --line:#e2e8f0; --accent:#6366f1; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:system-ui,-apple-system,sans-serif; color:var(--ink);
+         background:#f8fafc; min-height:100vh; padding:2.5rem 1rem; }
+  .wrap { max-width:720px; margin:0 auto; display:grid; gap:1.2rem; }
+  header { text-align:center; padding-bottom:.5rem; }
+  h1 { font-size:1.9rem; letter-spacing:-.02em; }
+  header p { color:var(--muted); margin-top:.4rem; font-size:.95rem; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:1.3rem; }
+  .card h2 { font-size:.78rem; text-transform:uppercase; letter-spacing:.08em;
+             color:var(--muted); margin-bottom:.9rem; }
+  form { display:flex; flex-wrap:wrap; gap:.6rem; }
+  .field { display:flex; flex-direction:column; gap:.3rem; flex:1; min-width:180px; }
+  .field label { font-size:.78rem; color:var(--muted); }
+  input, textarea { flex:1; padding:.55rem .75rem; font-size:1rem; border:1px solid var(--line);
+          border-radius:9px; background:#f8fafc; font-family:inherit; }
+  textarea { resize:vertical; min-height:4.5rem; width:100%; }
+  input:focus, textarea:focus { outline:2px solid var(--accent); border-color:transparent; }
+  button { padding:.55rem 1rem; font-size:.95rem; font-weight:600; border:0;
+           border-radius:9px; background:var(--accent); color:#fff; cursor:pointer; }
+  button.secondary { background:#e2e8f0; color:var(--ink); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .toolbar { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:.9rem; }
+  #vrContainer { position:relative; width:100%; aspect-ratio:16/10; border-radius:10px;
+                 overflow:hidden; background:#0f172a; }
+  #vrContainer canvas { display:block; width:100%; height:100%; }
+  .hint { color:var(--muted); font-size:.82rem; margin-top:.6rem; }
+  .status { font-size:.85rem; margin-top:.7rem; padding:.6rem .75rem; border-radius:8px; display:none; }
+  .status.ok { display:block; background:#dcfce7; color:#166534; }
+  .status.err { display:block; background:#fee2e2; color:#991b1b; }
+  .status.pending { display:block; background:#e0f2fe; color:#075985; }
+  pre.curl { background:#0f172a; color:#e2e8f0; padding:.7rem; border-radius:8px;
+             font-size:.78rem; overflow-x:auto; margin-top:.5rem; display:none; white-space:pre-wrap; word-break:break-all; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>3d</h1>
+      <p>Enter VR and rearrange cubes, spheres, and prisms with your hands.</p>
+    </header>
+
+    <section class="card">
+      <h2>VR scene</h2>
+      <div class="toolbar">
+        <button id="addCube">+ Cube</button>
+        <button id="addSphere">+ Sphere</button>
+        <button id="addPrism">+ Prism</button>
+        <button id="clearAll" class="secondary">Clear all</button>
+      </div>
+      <div id="vrContainer"></div>
+      <p class="hint">In VR: pull the trigger while pointing at an object to grab it, release to drop it.
+        Outside VR: click and drag an object with the mouse to move it.</p>
+    </section>
+
+    <section class="card">
+      <h2>Invite someone (Twilio SMS)</h2>
+      <form id="inviteForm">
+        <div class="field">
+          <label for="twSid">Account SID</label>
+          <input id="twSid" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="twToken">Auth Token</label>
+          <input id="twToken" type="password" placeholder="auth token" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="twFrom">From</label>
+          <input id="twFrom" placeholder="+15551234567" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="twTo">To</label>
+          <input id="twTo" placeholder="+15557654321" autocomplete="off">
+        </div>
+        <div class="field" style="flex-basis:100%">
+          <label for="twBody">Message</label>
+          <textarea id="twBody"></textarea>
+        </div>
+        <button type="submit" id="twSend">Send invite</button>
+      </form>
+      <div id="twStatus" class="status"></div>
+      <pre id="twCurl" class="curl"></pre>
+      <p class="hint">The auth token is kept only in this tab (never saved to disk). Account SID, from/to
+        numbers, and message are saved with kstore so they survive a refresh. Browsers usually can't call
+        Twilio's API directly (CORS) — if the send fails for that reason, use the copy-as-curl fallback
+        from a terminal or your own backend.</p>
+    </section>
+  </div>
+
+  <script type="module" src="vr-scene.js"></script>
+  <script type="module" src="twilio-invite.js"></script>
+</body>
+</html>

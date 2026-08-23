@@ -1,0 +1,9 @@
+{
+  "auth": true,
+  "tools": false,
+  "backup": true,
+  "pwa": false,
+  "qr": true,
+  "stats": true,
+  "multiplayer": false
+}

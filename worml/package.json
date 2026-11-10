@@ -1,0 +1,16 @@
+{
+  "name": "worml",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Worml - a WebXR elemental solar-system exploration game for Meta Quest 3",
+  "scripts": {
+    "start": "node tools/serve.mjs",
+    "test": "node tools/smoke.mjs",
+    "test:xr": "node tools/xr.mjs"
+  },
+  "devDependencies": {
+    "iwer": "^2.8.0",
+    "three": "^0.170.0"
+  }
+}

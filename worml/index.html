@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Worml</title>
+<meta name="description" content="Worml: fly between six elemental worlds and link them with wormholes. A WebXR game for Meta Quest 3.">
+<meta name="theme-color" content="#050814">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+<style>
+  html, body { margin: 0; height: 100%; background: #03050c; overflow: hidden; color: #e8eefc;
+    font-family: system-ui, "Segoe UI", Roboto, sans-serif; }
+  canvas { display: block; position: fixed; inset: 0; width: 100%; height: 100%; }
+  #overlay { position: fixed; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-start;
+    padding: clamp(20px, 6vw, 96px); box-sizing: border-box; overflow-y: auto;
+    background: linear-gradient(90deg, rgba(3,5,12,0.92) 0%, rgba(3,5,12,0.6) 46%, rgba(3,5,12,0) 78%);
+    transition: opacity 0.6s ease; }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  .card { max-width: 520px; }
+  h1 { font-size: clamp(56px, 10vw, 112px); line-height: 0.95; margin: 0 0 12px; font-weight: 800; letter-spacing: -0.03em;
+    background: linear-gradient(100deg, #4fc3ff, #c77dff 45%, #ff6a2a 90%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .tag { font-size: 19px; line-height: 1.5; color: #b9c6e2; margin: 0 0 26px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; font-size: 18px; font-weight: 700; padding: 15px 26px; border-radius: 999px; border: 0; cursor: pointer;
+    color: #04101e; background: linear-gradient(100deg, #7ad4ff, #c9a2ff); transition: transform 0.15s ease, opacity 0.2s; }
+  button:hover:not(:disabled) { transform: translateY(-1px) scale(1.02); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button.secondary, button.ghost { background: rgba(255,255,255,0.08); color: #e8eefc; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2); }
+  button.ghost { font-size: 14px; font-weight: 500; padding: 9px 16px; }
+  #status { margin: 18px 0 0; font-size: 15px; color: #8fa3c8; min-height: 1.4em; }
+  #vr-note { margin: 14px 0 0; font-size: 14px; color: #8fa3c8; line-height: 1.5; }
+  .keys { margin: 26px 0 16px; display: grid; grid-template-columns: auto 1fr; gap: 7px 16px; font-size: 14.5px; color: #b9c6e2; }
+  .keys b { color: #fff; font-weight: 600; white-space: nowrap; }
+  .keys .h { grid-column: 1 / -1; color: #7ad4ff; font-weight: 700; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="overlay">
+  <div class="card">
+    <h1>Worml</h1>
+    <p class="tag">Six elemental worlds circle one star. Gather each world's essence, carry it to the world it overcomes, and unseal the wormhole gates until the whole system is linked.</p>
+    <div class="row">
+      <button id="enter-vr" disabled hidden>Enter VR</button>
+      <button id="enter-desktop" disabled>Play in browser</button>
+    </div>
+    <p id="status">Shaping worlds…</p>
+    <p id="vr-note" hidden>No VR headset detected. Open this page in the Meta Quest Browser to play in VR, or play here with mouse and keyboard.</p>
+    <div class="keys">
+      <span class="h">Quest controllers</span>
+      <b>Trigger</b><span>Fly where that hand points. Higher is faster.</span>
+      <b>Grip</b><span>Draw in essence orbs · release essence at a sealed gate</span>
+      <b>Left stick</b><span>Walk / strafe</span>
+      <b>Right stick</b><span>Snap turn · up / down</span>
+      <b>A / X</b><span>Change a wormhole's destination</span>
+      <span class="h">Mouse &amp; keyboard</span>
+      <b>Mouse · W / S</b><span>Look · fly forward / back (Shift = slow)</span>
+      <b>A / D · Space / C</b><span>Strafe · up / down</span>
+      <b>E · F</b><span>Gather or release essence · change destination</span>
+    </div>
+    <button id="reset" class="ghost">Reset progress</button>
+  </div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

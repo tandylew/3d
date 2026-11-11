@@ -1,4 +1,5 @@
-// Unified input: Meta Quest Touch controllers in VR, mouse + keyboard on desktop.
+// Unified input: Meta Quest Touch controllers in VR, mouse + keyboard on
+// desktop, and an on-screen stick + buttons on phones and tablets.
 import * as THREE from 'three';
 import { Builder, propMaterial, glowMaterial } from './gfx.js';
 
@@ -31,6 +32,9 @@ export class Input {
     this.keys = new Set();
     this.yaw = 0; this.pitch = 0;
     this.mouseGrip = false;
+    // Touch state, written by touch.js (virtual stick + on-screen buttons).
+    this.touch = { on: false, move: new THREE.Vector2(), fly: 0, up: 0, down: 0, grip: 0, act: false };
+    this.dragLook = false; // dev dashboard: drag the view with the mouse instead of locking the pointer
     this._turnHeld = false; this._actHeld = false; this._keyEdges = [];
     this.debug = null; // tests can inject { trigger, grip, dir }
 
@@ -56,16 +60,22 @@ export class Input {
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => this.keys.clear());
     dom.addEventListener('mousedown', (e) => {
-      if (this.xr || !this.desktopActive) return;
+      if (this.xr || !this.desktopActive || this.touch.on) return;
+      if (this.dragLook) { this._drag = true; return; }
       if (document.pointerLockElement !== dom) dom.requestPointerLock?.();
       else if (e.button === 0) this.mouseGrip = true;
     });
-    addEventListener('mouseup', () => { this.mouseGrip = false; });
+    addEventListener('mouseup', () => { this.mouseGrip = false; this._drag = false; });
     addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement !== dom) return;
-      this.yaw -= e.movementX * 0.0022;
-      this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch - e.movementY * 0.0022));
+      const locked = document.pointerLockElement === dom;
+      if (!locked && !this._drag) return;
+      this.look(e.movementX * (locked ? 0.0022 : -0.004), e.movementY * (locked ? 0.0022 : -0.004));
     });
+  }
+
+  look(dx, dy) {
+    this.yaw -= dx;
+    this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch - dy));
   }
 
   pulse(hand, strength = 0.5, ms = 40) {
@@ -86,6 +96,8 @@ export class Input {
       if (d.trigger !== undefined) this.right.trigger = d.trigger;
       if (d.grip !== undefined) this.right.grip = d.grip;
       if (d.act) { this.actEdge = true; d.act = false; }
+      if (d.move) this.move.copy(d.move);
+      if (d.lift !== undefined) this.lift = d.lift;
     }
   }
 
@@ -136,5 +148,13 @@ export class Input {
     this.lift = (k.has('Space') ? 1 : 0) - (k.has('KeyC') ? 1 : 0);
     h.grip = k.has('KeyE') || this.mouseGrip ? 1 : 0;
     for (const code of this._keyEdges) if (code === 'KeyF' || code === 'Enter') this.actEdge = true;
+    const t = this.touch;
+    if (t.on) {
+      h.trigger = Math.max(-1, Math.min(1, h.trigger + t.fly));
+      this.move.x += t.move.x; this.move.y += t.move.y;
+      this.lift += t.up - t.down;
+      if (t.grip) h.grip = 1;
+      if (t.act) { this.actEdge = true; t.act = false; }
+    }
   }
 }

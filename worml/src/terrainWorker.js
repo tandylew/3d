@@ -63,7 +63,7 @@ function build(job) {
       pos[o] = x; pos[o + 1] = y; pos[o + 2] = z;
       nrm[o] = nx; nrm[o + 1] = ny; nrm[o + 2] = nz;
       col[o] = sh.r; col[o + 1] = sh.g; col[o + 2] = sh.b;
-      aux[o] = sh.liq; aux[o + 1] = sh.glow; aux[o + 2] = sh.shine;
+      aux[o] = h > 40 ? 1 : h < -40 ? -1 : h / 40; aux[o + 1] = sh.glow; aux[o + 2] = sh.shine;
       dps[o] = x + ox; dps[o + 1] = y + oy; dps[o + 2] = z + oz;
       const r2 = x * x + y * y + z * z;
       if (r2 > rad2) rad2 = r2;

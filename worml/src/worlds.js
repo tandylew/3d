@@ -25,35 +25,40 @@ export const PLANETS = [
     id: 'thalassa', name: 'Thalassa', title: 'World of Water', element: 'water',
     radius: 30000, orbit: 1800000, angle: 40, lift: 0.03, seed: 1101, liquid: true, maxH: 1600,
     needs: null, lock: '',
-    atmo: { scatter: [0.16, 0.4, 1.0], sunset: [1.0, 0.5, 0.25], density: 2.4, height: 520 },
+    atmo: { scatter: [0.16, 0.4, 1.0], sunset: [1.0, 0.5, 0.25], density: 2.4, height: 900 },
+    look: { rock: [0.31, 0.29, 0.27], rockP: [0.15, 0.3, 1], strata: 0.2, clouds: { mix: [0.55, 0, 0.33, 0.12], threshold: 0.5, soft: 0.13, opacity: 0.95, alt: 2300, tint: [1, 1, 1], drift: 0.0005 } },
     glow: [0.2, 0.9, 0.8],
   },
   {
     id: 'pyra', name: 'Pyra', title: 'World of Fire', element: 'fire',
     radius: 24000, orbit: 600000, angle: 12, lift: -0.02, seed: 2207, liquid: true, maxH: 3000,
     needs: { water: 5 }, lock: 'Wreathed in an undying firestorm. Water will douse it.',
-    atmo: { scatter: [0.8, 0.3, 0.12], sunset: [1.0, 0.7, 0.3], density: 2.4, height: 520 },
+    atmo: { scatter: [0.5, 0.3, 0.2], sunset: [1.0, 0.6, 0.3], density: 1.7, height: 900 },
+    look: { rock: [0.15, 0.13, 0.125], rockP: [0.2, 0.42, 0.85], strata: 0.3, clouds: { mix: [0, 0.6, 0.3, 0.1], threshold: 0.5, soft: 0.2, opacity: 0.85, alt: 3900, tint: [0.34, 0.27, 0.24], drift: 0.0008 } },
     glow: [1.0, 0.33, 0.04],
   },
   {
     id: 'ferrum', name: 'Ferrum', title: 'World of Metal', element: 'metal',
     radius: 28000, orbit: 1000000, angle: 64, lift: 0.05, seed: 3319, liquid: true, maxH: 1200,
     needs: { fire: 5 }, lock: 'Sealed inside an iron shell. Fire will melt it.',
-    atmo: { scatter: [0.38, 0.55, 0.7], sunset: [0.95, 0.75, 0.5], density: 1.5, height: 520 },
+    atmo: { scatter: [0.3, 0.4, 0.54], sunset: [0.95, 0.72, 0.5], density: 1.4, height: 900 },
+    look: { rock: [0.23, 0.24, 0.27], rockP: [0.1, 0.24, 1], strata: 0.3, metal: 0.45, clouds: { mix: [0.5, 0.3, 0, 0.2], threshold: 0.55, soft: 0.2, opacity: 0.6, alt: 2600, tint: [0.8, 0.82, 0.86], drift: 0.0004 } },
     glow: [0.15, 0.85, 1.0], rings: true,
   },
   {
     id: 'sylva', name: 'Sylva', title: 'World of Wood', element: 'wood',
     radius: 32000, orbit: 2250000, angle: 86, lift: -0.04, seed: 4421, liquid: true, maxH: 1600,
     needs: { metal: 5 }, lock: 'Strangled by iron-thorn vines. Metal will cut them.',
-    atmo: { scatter: [0.2, 0.5, 0.95], sunset: [1.0, 0.55, 0.3], density: 2.4, height: 520 },
+    atmo: { scatter: [0.2, 0.5, 0.95], sunset: [1.0, 0.55, 0.3], density: 2.4, height: 900 },
+    look: { rock: [0.3, 0.29, 0.26], rockP: [0.17, 0.32, 1], strata: 0.18, clouds: { mix: [0.1, 0.45, 0.33, 0.12], threshold: 0.48, soft: 0.14, opacity: 0.95, alt: 2500, tint: [1, 1, 1], drift: 0.0005 } },
     glow: [0.5, 1.0, 0.3],
   },
   {
     id: 'petra', name: 'Petra', title: 'World of Earth', element: 'earth',
     radius: 34000, orbit: 1400000, angle: 112, lift: 0.02, seed: 5527, liquid: false, maxH: 3400,
     needs: { wood: 5 }, lock: 'Buried under living stone. Wood will root it apart.',
-    atmo: { scatter: [0.75, 0.5, 0.3], sunset: [1.0, 0.45, 0.2], density: 1.9, height: 520 },
+    atmo: { scatter: [0.75, 0.5, 0.3], sunset: [1.0, 0.45, 0.2], density: 1.9, height: 900 },
+    look: { rock: [0.52, 0.31, 0.21], rockP: [0.1, 0.26, 1], strata: 0.3, clouds: { mix: [0.6, 0, 0.3, 0.1], threshold: 0.57, soft: 0.15, opacity: 0.75, alt: 4300, tint: [1, 0.94, 0.86], drift: 0.0004 } },
     glow: [1.0, 0.7, 0.3],
   },
   {
@@ -61,7 +66,8 @@ export const PLANETS = [
     radius: 26000, orbit: 2800000, angle: 132, lift: 0.06, seed: 6631, liquid: true, maxH: 4500,
     needs: { water: 2, fire: 2, metal: 2, wood: 2, earth: 2 },
     lock: 'Bound by a void seal. It yields only to all five elements.',
-    atmo: { scatter: [0.45, 0.2, 0.95], sunset: [0.3, 0.9, 1.0], density: 2.2, height: 520 },
+    atmo: { scatter: [0.4, 0.3, 0.8], sunset: [0.4, 0.85, 1.0], density: 2.2, height: 900 },
+    look: { rock: [0.24, 0.17, 0.36], rockP: [0.18, 0.36, 0.8], strata: 0.25, clouds: { mix: [0.3, 0.3, 0.3, 0.1], threshold: 0.52, soft: 0.18, opacity: 0.8, alt: 5300, tint: [0.85, 0.76, 1], drift: 0.0007 } },
     glow: [0.75, 0.3, 1.0],
   },
 ];
@@ -138,82 +144,89 @@ export function groundHeight(def, x, y, z) {
 const mix3 = (o, a, b, t) => { o.r = a[0] + (b[0] - a[0]) * t; o.g = a[1] + (b[1] - a[1]) * t; o.b = a[2] + (b[2] - a[2]) * t; };
 const into = (o, b, t) => { o.r += (b[0] - o.r) * t; o.g += (b[1] - o.g) * t; o.b += (b[2] - o.b) * t; };
 
+// Colours are sRGB albedos chosen from real materials (grass, wet sand,
+// basalt, sandstone...) rather than pure hues; the fragment shader adds rock,
+// strata and grain on top.
 const SHADE = {
   water(n, x, y, z, h, sl, o) {
     if (h < 0) {
-      mix3(o, [0.1, 0.66, 0.68], [0.01, 0.1, 0.3], smoothstep(0, 260, -h));
+      mix3(o, [0.24, 0.52, 0.5], [0.03, 0.14, 0.25], smoothstep(0, 70, -h));
+      into(o, [0.01, 0.06, 0.16], smoothstep(60, 600, -h));
       o.liq = 1; o.shine = 0.95; return;
     }
     const v = n.s(x * 70, y * 70, z * 70) * 0.5 + 0.5;
-    mix3(o, [0.2, 0.5, 0.24], [0.42, 0.56, 0.3], v);
-    into(o, [0.32, 0.46, 0.38], smoothstep(250, 600, h));
-    into(o, [0.88, 0.81, 0.62], 1 - smoothstep(6, 20, h + v * 6));
-    into(o, [0.46, 0.43, 0.4], smoothstep(0.14, 0.3, sl));
-    into(o, [0.9, 0.9, 0.92], smoothstep(900, 1150, h) * (1 - smoothstep(0.2, 0.34, sl)));
-    o.shine = 0.08;
+    mix3(o, [0.29, 0.34, 0.19], [0.4, 0.42, 0.25], v);
+    into(o, [0.44, 0.42, 0.27], smoothstep(0.55, 0.9, n.s(x * 23 + 5, y * 23, z * 23) * 0.5 + 0.5) * 0.6);
+    into(o, [0.36, 0.38, 0.28], smoothstep(250, 600, h));
+    into(o, [0.82, 0.76, 0.62], 1 - smoothstep(5, 18, h + v * 6));
+    into(o, [0.4, 0.38, 0.34], smoothstep(0.14, 0.3, sl) * 0.5);
+    into(o, [0.93, 0.94, 0.96], smoothstep(900, 1150, h) * (1 - smoothstep(0.2, 0.34, sl)));
+    o.shine = 0.06;
   },
   fire(n, x, y, z, h, sl, o, mf) {
     if (h < 0) {
-      mix3(o, [0.75, 0.2, 0.03], [1.0, 0.5, 0.1], smoothstep(0, 40, -h));
-      o.liq = 1; o.glow = 0.55 + 0.45 * smoothstep(0, 30, -h); o.shine = 0.15; return;
+      mix3(o, [0.5, 0.12, 0.03], [0.95, 0.42, 0.08], smoothstep(0, 40, -h));
+      o.liq = 1; o.glow = 0.55 + 0.45 * smoothstep(0, 30, -h); o.shine = 0.12; return;
     }
     const v = n.s(x * 40, y * 40, z * 40) * 0.5 + 0.5;
-    mix3(o, [0.085, 0.075, 0.075], [0.26, 0.23, 0.21], v * (0.4 + smoothstep(0.05, 0.3, sl) * 0.6));
-    into(o, [0.36, 0.13, 0.08], smoothstep(700, 1700, h) * 0.8);
-    const vein = (1 - smoothstep(0.0, 0.028, Math.abs(n.fbm(x, y, z, 45, 3, mf)))) * (1 - smoothstep(40, 520, h));
-    const shore = 1 - smoothstep(0, 16, h);
-    o.glow = Math.max(vein, shore * 0.7);
-    into(o, [1.0, 0.36, 0.06], o.glow);
-    o.shine = 0.3;
+    mix3(o, [0.12, 0.11, 0.11], [0.27, 0.24, 0.22], v * (0.4 + smoothstep(0.05, 0.3, sl) * 0.6));
+    into(o, [0.36, 0.2, 0.14], smoothstep(700, 1700, h) * 0.7);
+    into(o, [0.5, 0.44, 0.2], smoothstep(0.7, 0.92, n.s(x * 17 - 3, y * 17, z * 17) * 0.5 + 0.5) * 0.35);
+    const vein = (1 - smoothstep(0.0, 0.022, Math.abs(n.fbm(x, y, z, 45, 3, mf)))) * (1 - smoothstep(40, 520, h));
+    const shore = 1 - smoothstep(0, 14, h);
+    o.glow = Math.max(vein * 0.9, shore * 0.6);
+    into(o, [0.6, 0.2, 0.06], o.glow * 0.45);
+    o.shine = 0.22;
   },
   metal(n, x, y, z, h, sl, o, mf) {
-    if (h < 0) { o.r = 0.74; o.g = 0.77; o.b = 0.82; o.liq = 1; o.shine = 1; return; }
+    if (h < 0) { o.r = 0.5; o.g = 0.52; o.b = 0.56; o.liq = 1; o.shine = 1; return; }
     const v = n.fbm(x, y, z, 22, 3, mf) + 0.5;
-    mix3(o, [0.5, 0.54, 0.6], [0.3, 0.33, 0.39], clamp(v, 0, 1));
-    into(o, [0.74, 0.42, 0.2], smoothstep(0.62, 0.8, n.s(x * 9, y * 9, z * 9) * 0.5 + 0.5) * 0.85);
-    into(o, [0.93, 0.72, 0.26], smoothstep(600, 850, h));
+    mix3(o, [0.34, 0.34, 0.36], [0.22, 0.22, 0.25], clamp(v, 0, 1));
+    into(o, [0.42, 0.25, 0.16], smoothstep(0.5, 0.78, n.s(x * 9, y * 9, z * 9) * 0.5 + 0.5) * 0.85);
+    into(o, [0.5, 0.48, 0.44], smoothstep(600, 850, h));
     const riser = smoothstep(0.1, 0.24, sl);
-    into(o, [0.13, 0.14, 0.17], riser);
-    const circuit = (1 - smoothstep(0.0, 0.02, Math.abs(n.fbm(x, y, z, 70, 2, mf)))) * (1 - riser);
-    o.glow = circuit * 0.8;
-    into(o, [0.2, 0.85, 1.0], o.glow * 0.7);
-    o.shine = 0.8 - riser * 0.3;
+    into(o, [0.16, 0.16, 0.19], riser * 0.6);
+    const seam = (1 - smoothstep(0.0, 0.014, Math.abs(n.fbm(x, y, z, 70, 2, mf)))) * (1 - riser);
+    o.glow = seam * 0.4;
+    into(o, [0.3, 0.75, 0.9], o.glow * 0.8);
+    o.shine = 0.5 - riser * 0.2;
   },
   wood(n, x, y, z, h, sl, o) {
     if (h < 0) {
-      mix3(o, [0.1, 0.4, 0.42], [0.02, 0.15, 0.24], smoothstep(0, 30, -h));
+      mix3(o, [0.2, 0.32, 0.24], [0.04, 0.13, 0.13], smoothstep(0, 22, -h));
       o.liq = 1; o.shine = 0.9; return;
     }
     const v = n.s(x * 26, y * 26, z * 26) * 0.5 + 0.5;
-    mix3(o, [0.3, 0.56, 0.14], [0.07, 0.28, 0.08], smoothstep(0.3, 0.7, v));
-    into(o, [0.62, 0.42, 0.1], smoothstep(0.72, 0.9, n.s(x * 11 + 9, y * 11, z * 11) * 0.5 + 0.5) * 0.7);
-    into(o, [0.37, 0.29, 0.17], 1 - smoothstep(3, 12, h));
-    into(o, [0.36, 0.36, 0.31], smoothstep(0.16, 0.3, sl));
-    into(o, [0.7, 0.76, 0.7], smoothstep(900, 1300, h));
+    mix3(o, [0.27, 0.33, 0.17], [0.15, 0.21, 0.11], smoothstep(0.3, 0.7, v));
+    into(o, [0.4, 0.36, 0.17], smoothstep(0.72, 0.9, n.s(x * 11 + 9, y * 11, z * 11) * 0.5 + 0.5) * 0.6);
+    into(o, [0.3, 0.25, 0.17], 1 - smoothstep(2, 10, h));
+    into(o, [0.36, 0.35, 0.3], smoothstep(0.16, 0.3, sl) * 0.5);
+    into(o, [0.52, 0.53, 0.47], smoothstep(900, 1300, h));
     o.shine = 0.05;
   },
   earth(n, x, y, z, h, sl, o) {
     const s = h / 38 + n.s(x * 8, y * 8, z * 8) * 1.6;
-    mix3(o, [0.76, 0.4, 0.2], [0.91, 0.68, 0.42], 0.5 + 0.5 * Math.sin(s));
-    into(o, [0.5, 0.23, 0.14], (0.5 + 0.5 * Math.sin(s * 2.7 + 1.3)) * 0.45);
-    into(o, [0.9, 0.75, 0.5], (1 - smoothstep(0.02, 0.08, sl)) * 0.9);
-    into(o, [0.96, 0.96, 0.98], smoothstep(1500, 1900, h) * (1 - smoothstep(0.2, 0.34, sl)));
+    mix3(o, [0.63, 0.38, 0.24], [0.76, 0.58, 0.4], 0.5 + 0.5 * Math.sin(s));
+    into(o, [0.45, 0.25, 0.17], (0.5 + 0.5 * Math.sin(s * 2.7 + 1.3)) * 0.35);
+    into(o, [0.8, 0.66, 0.47], (1 - smoothstep(0.02, 0.08, sl)) * 0.9);
+    into(o, [0.5, 0.47, 0.3], smoothstep(0.62, 0.85, n.s(x * 19, y * 19 + 4, z * 19) * 0.5 + 0.5) * (1 - smoothstep(0.02, 0.1, sl)) * 0.45);
+    into(o, [0.95, 0.95, 0.97], smoothstep(1500, 1900, h) * (1 - smoothstep(0.2, 0.34, sl)));
     o.shine = 0.04;
   },
   magic(n, x, y, z, h, sl, o, mf) {
     if (h < 0) {
-      mix3(o, [0.62, 0.3, 1.0], [0.3, 0.12, 0.85], smoothstep(0, 60, -h));
-      o.liq = 1; o.glow = 0.75; o.shine = 0.8; return;
+      mix3(o, [0.42, 0.24, 0.72], [0.16, 0.08, 0.5], smoothstep(0, 60, -h));
+      o.liq = 1; o.glow = 0.5; o.shine = 0.85; return;
     }
     const v = n.s(x * 30, y * 30, z * 30) * 0.5 + 0.5;
-    mix3(o, [0.22, 0.1, 0.34], [0.09, 0.15, 0.36], v);
+    mix3(o, [0.2, 0.15, 0.26], [0.13, 0.14, 0.24], v);
     const cr = smoothstep(0.16, 0.32, sl);
-    into(o, [0.3, 0.82, 0.92], cr * 0.85);
-    const vein = 1 - smoothstep(0.0, 0.03, Math.abs(n.fbm(x, y, z, 38, 3, mf)));
+    into(o, [0.34, 0.6, 0.7], cr * 0.5);
+    const vein = 1 - smoothstep(0.0, 0.022, Math.abs(n.fbm(x, y, z, 38, 3, mf)));
     const tip = smoothstep(1100, 1900, h);
-    into(o, [0.96, 0.5, 0.92], Math.max(vein, tip));
-    o.glow = Math.max(vein * 0.9, cr * 0.3, tip * 0.6);
-    o.shine = 0.25 + cr * 0.65;
+    into(o, [0.6, 0.4, 0.7], Math.max(vein, tip * 0.5) * 0.6);
+    o.glow = Math.max(vein * 0.8, cr * 0.1, tip * 0.3);
+    o.shine = 0.25 + cr * 0.5;
   },
 };
 

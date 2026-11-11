@@ -36,7 +36,7 @@ function affliction(element, seed) {
   if (element === 'fire') {
     for (let i = 0; i < 16; i++) {
       const a = rnd() * 6.28, r = 3 + rnd() * 9;
-      b.add(new THREE.IcosahedronGeometry(0.8 + rnd() * 1.3, 0), [0.1, 0.07, 0.06], 0, Math.cos(a) * r, 0.5, (rnd() - 0.5) * 6, 1, 0.7, 1, rnd(), rnd(), 0);
+      b.blob(0.8 + rnd() * 1.3, [0.13, 0.11, 0.1], 0, Math.cos(a) * r, 0.5, (rnd() - 0.5) * 6, { detail: 1, rough: 0.7, sy: 0.7, seed: i, ridged: true });
       b.spike(0.3, 1.5 + rnd(), 4, [1.0, 0.4, 0.08], 0.8, Math.cos(a) * r, 0.6, (rnd() - 0.5) * 6, rnd() * 6, 0.3);
     }
   } else if (element === 'metal') {
@@ -65,8 +65,8 @@ function affliction(element, seed) {
     for (let i = 0; i < 40; i++) {
       const y = Math.pow(rnd(), 1.6) * 19, half = Math.sqrt(Math.max(4, RING_R * RING_R - (y - RING_Y) ** 2));
       const tone = rnd();
-      b.add(new THREE.DodecahedronGeometry(1.6 + rnd() * 2.1, 0), [0.6 + tone * 0.28, 0.34 + tone * 0.3, 0.18 + tone * 0.2], 0,
-        (rnd() * 2 - 1) * half, y + 0.8, (rnd() - 0.5) * 4.5, 1, 0.8, 1, rnd() * 3, rnd() * 3, 0);
+      b.blob(1.7 + rnd() * 2.2, [0.5 + tone * 0.22, 0.31 + tone * 0.22, 0.2 + tone * 0.16], 0,
+        (rnd() * 2 - 1) * half, y + 0.8, (rnd() - 0.5) * 4.5, { detail: 2, rough: 0.4, sy: 0.8, seed: i, rx: rnd() * 3, ry: rnd() * 3, color2: [0.74, 0.56, 0.39] });
     }
   } else if (element === 'magic') {
     for (let i = 0; i < 12; i++) {
@@ -121,7 +121,7 @@ export class Gate {
     this.beacon.frustumCulled = false;
     this.group.add(this.beacon);
 
-    this.partMat = glowMaterial(LOCK_COLOR[def.element], 1.6, 1.0);
+    this.partMat = glowMaterial(LOCK_COLOR[def.element], 1.6, 0.55);
     this.parts = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), this.partMat, PARTICLES);
     this.parts.frustumCulled = false;
     this.group.add(this.parts);

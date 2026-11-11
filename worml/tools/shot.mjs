@@ -4,7 +4,7 @@ const { chromium } = createRequire(import.meta.url)('playwright');
 import { serve } from './serve.mjs';
 
 const server = await serve(0);
-const url = `http://localhost:${server.address().port}/?reset`;
+const url = `http://localhost:${server.address().port}/?reset&res=1`;
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
 const errors = [];

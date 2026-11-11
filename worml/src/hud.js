@@ -46,6 +46,7 @@ export class Hud {
     this.toastT = 0; this.toastQueue = []; this.toastText = null;
     this.markers = new Map();
     this.tick = 0; this.wristTimer = 0;
+    this.markersOn = true; this.flatKey = '';
   }
 
   say(title, sub = '', seconds = 5, color = '#ffffff') {
@@ -82,8 +83,8 @@ export class Hud {
   // info: { id, dir (unit, scene space), name, sub, dist, css, state: 'locked'|'open'|'goal', aimed }
   setMarker(info) {
     const m = this.marker(info.id);
-    m.sprite.visible = info.visible;
-    if (!info.visible) return;
+    m.sprite.visible = info.visible && this.markersOn;
+    if (!m.sprite.visible) return;
     const goal = info.state === 'goal';
     const D = 420, w = D * (info.aimed ? 0.27 : goal ? 0.23 : 0.19);
     m.sprite.position.copy(info.dir).multiplyScalar(D);
@@ -140,9 +141,24 @@ export class Hud {
     const wm = this.wrist.mesh, leftCtrl = this.input.ctrl.find((k) => k.handed === 'left');
     const parent = this.input.xr && leftCtrl ? leftCtrl.ray : this.camera;
     if (wm.parent !== parent) {
-      parent.add(wm);
-      if (parent === this.camera) { wm.position.set(-0.36, -0.2, -0.75); wm.rotation.set(-0.1, 0.35, 0); wm.scale.setScalar(1.25); }
-      else { wm.position.set(0.02, 0.1, 0.03); wm.rotation.set(-1.0, 0, 0); wm.scale.setScalar(1); }
+      parent.add(wm); this.flatKey = '';
+      if (parent !== this.camera) { wm.position.set(0.02, 0.1, 0.03); wm.rotation.set(-1.0, 0, 0); wm.scale.setScalar(1); }
+    }
+    if (parent === this.camera) {
+      // Flat screens: pin the panel to a corner whatever the aspect ratio.
+      // Touch layouts keep the bottom of the screen for thumbs, so it goes top-left.
+      const touch = this.input.touch.on, cam = this.camera, key = `${cam.aspect.toFixed(3)}|${cam.fov.toFixed(1)}|${touch}`;
+      if (key !== this.flatKey) {
+        this.flatKey = key;
+        const d = 0.75, hh = Math.tan((cam.fov * Math.PI) / 360) * d, hw = hh * cam.aspect;
+        const frac = cam.aspect < 1 ? 0.44 : touch ? 0.25 : 0.2;
+        const sc = Math.min((hw * 2 * frac) / 0.2, (hh * 2 * 0.32) / 0.15);
+        const mx = Math.min(hw, hh) * 0.06;
+        wm.scale.setScalar(sc);
+        wm.position.set(-hw + mx + 0.1 * sc, touch ? hh - mx - 0.075 * sc : -hh + mx + 0.075 * sc, -d);
+        wm.rotation.set(0, touch ? 0 : 0.2, 0);
+        this.toastScale = Math.min(1, (hw / d) * 2.3 * 2 * 0.92 / 1.5);
+      }
     }
     this.wristTimer -= dt;
     if (this.wristTimer <= 0) { this.wristTimer = 0.2; this.drawWrist(state); }
@@ -158,6 +174,7 @@ export class Hud {
     const target = this.toastT > 0 ? Math.min(1, this.toastT * 2, (this.toastText.seconds - this.toastT) * 3) : 0;
     t.material.opacity += (target - t.material.opacity) * Math.min(1, dt * 10);
     t.visible = t.material.opacity > 0.01;
+    t.scale.setScalar(this.input.xr ? 1 : this.toastScale || 1);
     a.set(0, 0, -1).applyQuaternion(this.camera.quaternion); a.y = 0;
     if (a.lengthSq() < 1e-4) a.set(0, 0, -1);
     a.normalize();

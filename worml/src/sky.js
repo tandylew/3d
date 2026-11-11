@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { SUN } from './worlds.js';
 import { mulberry32 } from './noise.js';
-import { uvVS, nebulaFS, starVS, starFS, sunFS, coronaFS } from './shaders.js';
+import { uvVS, nebulaFS, cloudBakeFS, starVS, starFS, sunFS, coronaFS } from './shaders.js';
 import { additive } from './gfx.js';
 
 export class Sky {
@@ -14,8 +14,15 @@ export class Sky {
       new THREE.ShaderMaterial({ vertexShader: uvVS, fragmentShader: nebulaFS, side: THREE.BackSide }));
     bakeScene.add(box);
     new THREE.CubeCamera(0.1, 10, rt).update(renderer, bakeScene);
-    box.geometry.dispose(); box.material.dispose();
     scene.background = rt.texture;
+
+    // Cloud noise, shared by every world (each blends the channels differently).
+    const crt = new THREE.WebGLCubeRenderTarget(1024, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter });
+    box.material.dispose();
+    box.material = new THREE.ShaderMaterial({ vertexShader: uvVS, fragmentShader: cloudBakeFS, side: THREE.BackSide });
+    new THREE.CubeCamera(0.1, 10, crt).update(renderer, bakeScene);
+    this.cloudMap = crt.texture;
+    box.geometry.dispose(); box.material.dispose();
 
     const rnd = mulberry32(77), COUNT = 2600;
     const pos = new Float32Array(COUNT * 3), col = new Float32Array(COUNT * 3), size = new Float32Array(COUNT);

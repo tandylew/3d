@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node tools/serve.mjs",
     "test": "node tools/smoke.mjs",
-    "test:xr": "node tools/xr.mjs"
+    "test:xr": "node tools/xr.mjs",
+    "test:ui": "node tools/ui.mjs"
   },
   "devDependencies": {
     "iwer": "^2.8.0",

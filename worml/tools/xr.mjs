@@ -56,9 +56,10 @@ await page.evaluate(() => {
   c.quaternion.set(Math.sin(0.45), 0, 0, Math.cos(0.45)); // pitched 0.9 rad upward
   c.updateButtonValue('trigger', 1);
 });
-await wait(6000);
+// (software rendering runs at a few fps, so wait on altitude rather than the clock)
+await page.waitForFunction(() => window.worml.game.player.alt > 8, null, { timeout: 60000 }).catch(() => {});
 s = await state();
-check('trigger thrust lifts off', s.trigger > 0.9 && s.alt > 5 && s.speed > 20, `alt=${s.alt.toFixed(0)} m, speed=${s.speed.toFixed(0)} m/s`);
+check('trigger thrust lifts off', s.trigger > 0.9 && s.alt > 8 && s.speed > 10, `alt=${s.alt.toFixed(0)} m, speed=${s.speed.toFixed(0)} m/s`);
 await page.screenshot({ path: 'shots/xr-flight.png' });
 await page.evaluate(() => window.xrDevice.controllers.right.updateButtonValue('trigger', 0));
 

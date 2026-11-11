@@ -1,15 +1,48 @@
-// All GLSL lives here. Shaders are deliberately cheap per pixel: the Quest 3
-// renders every fragment twice at high resolution, so lighting is analytic and
-// surface detail is baked into vertex attributes by the terrain worker.
+// All GLSL lives here. Lighting is analytic (no shadow maps, no post-processing)
+// so it stays affordable on a Quest 3, which renders every fragment twice.
+// Surface colour is baked per vertex by the terrain worker; the fragment shader
+// adds the things that make it read as a real place: crisp rock and strata on
+// slopes, grain, water optics, cloud shadows and height-aware haze.
 
 const ATMO = /* glsl */ `
-const vec3 SUN_COLOR = vec3(1.0, 0.95, 0.86);
+const vec3 SUN_COLOR = vec3(1.0, 0.96, 0.9);
+// Sky radiance for a view direction. mu = cos(angle to sun), thick = 0 at the
+// zenith .. 1 along the horizon (long optical path: paler and brighter).
 vec3 atmoColor(vec3 scatter, vec3 sunset, float sunElev, float mu, float thick) {
   float tw = 1.0 - smoothstep(-0.05, 0.42, sunElev);
   vec3 c = mix(scatter, sunset, tw * (0.3 + 0.7 * max(mu, 0.0)) * 0.9);
-  vec3 pale = mix(c, vec3(dot(c, vec3(0.3333))), 0.25) * 1.2 + 0.03;
-  c = mix(c, pale, thick * 0.5);
+  c *= 0.72 + 0.28 * mu * mu;
+  vec3 pale = mix(c, vec3(dot(c, vec3(0.3333))), 0.5 - 0.3 * tw) * 1.45 + 0.04;
+  c = mix(c * 0.8, pale, thick * (0.72 - 0.2 * tw));
   return c * smoothstep(-0.26, 0.22, sunElev);
+}
+// Sunlight after its trip through the air: warm and dim near the horizon.
+vec3 sunLight(float elev, vec3 sunset) {
+  vec3 warm = mix(sunset, SUN_COLOR, 0.25);
+  return mix(warm, SUN_COLOR, smoothstep(0.0, 0.4, elev)) * smoothstep(-0.1, 0.08, elev);
+}
+// Optical depth of haze between the camera (altitude hc) and a point (altitude
+// hp) for an exponential atmosphere: valleys fill with haze, peaks stay clear.
+float hazeDepth(float dist, float hc, float hp, float H, float fog0) {
+  float a = max(hc, -200.0) / H, b = max(hp, -200.0) / H, d = b - a;
+  float avg = abs(d) < 0.02 ? exp(-a) : (exp(-a) - exp(-b)) / d;
+  return dist * fog0 * avg;
+}
+`;
+
+const CLOUD = /* glsl */ `
+uniform samplerCube uCloudMap;
+uniform vec4 uCloudMix;   // how this world blends the four baked noise fields
+uniform vec4 uCloudP;     // x threshold, y softness, z opacity, w layer altitude (m)
+uniform vec2 uCloudCS;    // slow rotation of the weather about the pole
+vec3 cloudRot(vec3 d) { return vec3(uCloudCS.x * d.x + uCloudCS.y * d.z, d.y, uCloudCS.x * d.z - uCloudCS.y * d.x); }
+float cloudBase(vec3 dir) { return dot(textureCube(uCloudMap, cloudRot(dir)), uCloudMix); }
+// Fraction of direct sun reaching a point at height h (planet-relative P).
+float cloudShadow(vec3 P, vec3 up, float h) {
+  float se = dot(up, uSunDir);
+  vec3 dir = normalize(P + uSunDir * (max(uCloudP.w - h, 0.0) / max(se, 0.12)));
+  float c = smoothstep(uCloudP.x, uCloudP.x + uCloudP.y, cloudBase(dir));
+  return 1.0 - c * uCloudP.z * 0.78 * step(h, uCloudP.w);
 }
 `;
 
@@ -38,67 +71,115 @@ void main() {
 export const terrainFS = /* glsl */ `
 precision highp float;
 uniform sampler2D uDetail;
-uniform vec3 uCenter, uSunDir, uScatter, uSunset, uGlowColor;
-uniform float uFog, uSpace, uTime, uCamSunElev;
+uniform vec3 uCenter, uSunDir, uScatter, uSunset, uGlowColor, uRockCol, uRockP;
+uniform float uFog0, uSpace, uTime, uCamSunElev, uR, uH, uCamAlt, uStrata, uLiquid, uMetal;
 varying vec3 vColor;
-varying vec3 vAux;
+varying vec3 vAux;     // x: height above the liquid level / 40 m (clamped), y: glow, z: shine
 varying vec3 vDpos;
 varying vec3 vNormal;
 varying vec3 vWorld;
 ${ATMO}
+${CLOUD}
 void main() {
   vec3 toCam = cameraPosition - vWorld;
   float dist = length(toCam);
   vec3 V = toCam / dist;
-  vec3 up = normalize(vWorld - uCenter);
-  float liq = step(0.5, vAux.x);
+  vec3 P = vWorld - uCenter;
+  float rP = length(P);
+  vec3 up = P / rP;
+  float hgt = rP - uR;
+  float shoreH = vAux.x * 40.0;
+  float liq = uLiquid * step(shoreH, 0.0);
 
-  // Surface detail. The 8 m layer is triplanar (3 fetches); the 64 m and 1.3 m
-  // layers use one skewed planar fetch each, which never degenerates on any
-  // axis-aligned slope. Five texture reads per pixel in total.
+  // Detail texture: R soft fbm, G hard grit, BA slope of both. The 8 m layer is
+  // triplanar; the others use one skewed planar fetch each (integer
+  // coefficients keep them continuous across patch tiles).
   vec3 w = up * up;
   vec2 flow = liq * uTime * vec2(0.021, 0.013);
   vec4 dx = texture2D(uDetail, vDpos.yz * 0.125 + flow);
   vec4 dy = texture2D(uDetail, vDpos.xz * 0.125 + flow);
   vec4 dz = texture2D(uDetail, vDpos.xy * 0.125 + flow);
   vec4 dn = dx * w.x + dy * w.y + dz * w.z;
-  // integer coefficients keep the mapping continuous across patch tiles
-  vec2 skew = vec2(vDpos.x + vDpos.y, vDpos.z - vDpos.y);
+  // two skewed planar mappings; each pixel uses whichever is less stretched on its slope
+  vec3 Ng = normalize(vNormal);
+  vec2 skew = abs(Ng.x - Ng.y - Ng.z) > abs(Ng.x + Ng.y - Ng.z)
+    ? vec2(vDpos.x + vDpos.y, vDpos.z - vDpos.y) : vec2(vDpos.x - vDpos.y, vDpos.z + vDpos.y);
   vec4 dm = texture2D(uDetail, skew * 0.015625 - flow * 0.3);
-  vec4 df = texture2D(uDetail, skew * 0.75 + flow * 2.0);
-  float fineF = 1.0 / (1.0 + dist * 0.12);
-  float nearF = 1.0 / (1.0 + dist * 0.02);
-  float midF = 1.0 / (1.0 + dist * 0.0025);
+  vec4 df = texture2D(uDetail, skew * 0.5 + flow * 2.0);
+  vec4 dk = texture2D(uDetail, skew * 0.001953125);
+  float fineF = 1.0 / (1.0 + dist * 0.1);
+  float nearF = 1.0 / (1.0 + dist * 0.016);
+  float midF = 1.0 / (1.0 + dist * 0.002);
+  float farF = 1.0 / (1.0 + dist * 0.00018);
   vec3 bump = (vec3(0.0, dx.ba - 0.5) * w.x + vec3(dy.b - 0.5, 0.0, dy.a - 0.5) * w.y + vec3(dz.ba - 0.5, 0.0) * w.z) * nearF
             + vec3(dm.b - 0.5, (dm.a - dm.b) * 0.5, dm.a - 0.5) * midF
+            + vec3(dk.b - 0.5, (dk.a - dk.b) * 0.5, dk.a - 0.5) * farF * 0.8
             + vec3(df.b - 0.5, (df.a - df.b) * 0.5, df.a - 0.5) * fineF;
 
-  vec3 N = normalize(mix(normalize(vNormal), up, liq) + bump * mix(2.2, 0.6, liq));
+  float slope = 1.0 - dot(Ng, up);
   vec3 albedo = pow(vColor, vec3(2.2));
-  float tex = (dn.r - 0.5) * nearF + (dm.g - 0.5) * midF * 1.3 + (df.g - 0.5) * fineF * 1.1;
-  albedo *= max(1.0 + tex * mix(1.5, 0.3, liq), 0.15);
 
-  float shine = vAux.z;
-  float day = smoothstep(-0.18, 0.12, dot(up, uSunDir));
+  // Bare rock breaks through on steep ground along a ragged, pixel-sharp line,
+  // banded by sedimentary strata that follow true altitude.
+  float rag = (dm.r - 0.5) * 0.22 * midF + (dn.r - 0.5) * 0.14 * nearF + (dk.r - 0.5) * 0.2;
+  float rock = smoothstep(uRockP.x, uRockP.y, slope + rag) * uRockP.z * (1.0 - liq);
+  float band = sin(hgt * 0.37 + dk.r * 14.0 + dm.r * 3.0) * 0.6 + sin(hgt * 0.083 + dk.g * 6.0) * 0.4;
+  albedo = mix(albedo, uRockCol * (1.0 + band * uStrata), rock);
+  bump *= 1.0 + rock * 0.9;
+
+  float tex = (dn.r - 0.5) * nearF * 0.28 + (dn.g - 0.5) * nearF * 0.34 + (dm.g - 0.5) * midF * 0.22
+            + (df.g - 0.5) * fineF * 0.55 + (dk.r - 0.5) * farF * 0.4 + (dm.r - 0.5) * midF * 0.25;
+  albedo *= max(1.0 + tex * mix(0.8, 0.2, liq), 0.5);
+  // damp sand and foam along the waterline
+  float wet = uLiquid * (1.0 - liq) * (1.0 - smoothstep(0.0, 1.6, shoreH + (dn.r - 0.5) * 1.2)) * (1.0 - vAux.y);
+  albedo *= 1.0 - 0.45 * wet;
+  float foam = liq * smoothstep(-2.2, -0.1, shoreH + (dm.r - 0.5) * 2.0 + sin(uTime * 0.9 + dk.r * 20.0) * 0.5)
+             * smoothstep(0.35, 0.75, df.r * 0.6 + dn.g * 0.6) * step(0.6, vAux.z) * (1.0 - uMetal);
+
+  float shine = max(vAux.z, wet * 0.5);
+  vec3 N = normalize(mix(Ng, up, liq) + bump * mix(1.25, 0.3, liq));
+  float sunE = dot(up, uSunDir);
+  vec3 sunC = sunLight(sunE, uSunset) * cloudShadow(P, up, hgt);
   float ndl = max(dot(N, uSunDir), 0.0);
-  vec3 sky = atmoColor(uScatter, uSunset, dot(up, uSunDir), 0.0, 0.3);
+  vec3 sky = atmoColor(uScatter, uSunset, sunE, 0.0, 0.35);
+  float nu = dot(N, up);
+  // sun, sky dome, and a little sunlight bounced back off the surrounding ground
+  vec3 light = sunC * ndl * 2.5 + sky * (0.6 + 0.42 * nu) + sunC * albedo * (0.5 - 0.4 * nu) * max(sunE, 0.0) * 0.35 + vec3(0.006, 0.007, 0.011);
+
+  float ndv = max(dot(N, V), 0.0);
+  float fres = pow(1.0 - ndv, 5.0);
+  vec3 Rv = reflect(-V, N);
+  Rv = normalize(Rv + up * max(-dot(Rv, up), 0.0) * 1.2);
+  vec3 refl = atmoColor(uScatter, uSunset, sunE, dot(Rv, uSunDir), pow(1.0 - max(dot(Rv, up), 0.0), 3.0)) * 1.15 * (1.0 - uSpace * 0.8);
+  float f0 = uMetal * (0.35 + 0.65 * liq);
+  float mirror = clamp((f0 + (1.0 - f0) * fres) * shine, 0.0, 1.0);
   vec3 H = normalize(uSunDir + V);
-  float ndh = max(dot(N, H), 0.0);
-  float fres = pow(1.0 - max(dot(N, V), 0.0), 5.0);
-  float spec = pow(ndh, mix(24.0, 260.0, shine)) * shine * (0.6 + 4.0 * shine);
-  vec3 base = mix(albedo, sky * 0.9, clamp(fres * shine + shine * 0.12, 0.0, 0.9));
-  vec3 ambient = sky * (0.22 + 0.2 * dot(N, up)) + vec3(0.012, 0.014, 0.022);
-  vec3 col = base * (SUN_COLOR * ndl * day * 1.7 + ambient) + SUN_COLOR * spec * day;
+  // waves too small to resolve from afar act as roughness: the glint widens and dims
+  float gloss = mix(18.0, 900.0, shine * shine) / (1.0 + dist * 0.0004);
+  float spec = pow(max(dot(N, H), 0.0), gloss) * (gloss + 8.0) * 0.012 * shine * (0.2 + 0.8 * mix(fres, 1.0, uMetal));
+  vec3 col = mix(albedo * light, refl, mirror) + sunC * spec * 3.0;
+  col = mix(col, (sunC * (0.35 + 0.65 * max(sunE, 0.0)) * 2.4 + sky) * 0.8, foam * 0.85);
 
-  float pulse = 0.7 + 0.6 * dm.g + 0.25 * sin(uTime * 1.7 + dn.g * 9.0);
-  col += uGlowColor * vAux.y * pulse * 2.6 * mix(vec3(1.0), albedo * 2.5, 0.35);
+  // Emissive: lava and luminous seas crust over in drifting plates; veins pulse gently.
+  // (a cooled dark skin split by a web of bright cracks, with open molten pools)
+  float plate = dm.r * 0.55 + dn.r * 0.3 + dk.r * 0.35;
+  float cracks = 1.0 - smoothstep(0.0, 0.03 + 0.025 * dk.g, abs(plate - 0.6));
+  float molten = max(cracks, smoothstep(0.64, 0.8, dk.r + (dm.r - 0.5) * 0.3));
+  // on land the glow lives in fissures rather than lighting whole faces
+  float fissure = 1.0 - smoothstep(0.0, 0.1, abs(dn.r * 0.6 + dm.r * 0.5 - 0.55));
+  float land = (0.22 + 0.78 * fissure) * (0.85 + 0.15 * sin(uTime * 1.7 + dn.r * 9.0));
+  float heat = vAux.y * mix(land, molten * 1.2 + 0.04, liq);
+  col = mix(col, col * 0.3, liq * (1.0 - molten) * step(0.05, vAux.y));
+  col += (uGlowColor + vec3(0.3, 0.22, 0.1) * heat * heat) * heat * mix(1.9, 2.4, liq) * mix(vec3(1.0), albedo * 2.5, 0.3);
 
-  // Aerial perspective near the ground, limb haze from orbit.
+  // Aerial perspective from the ground, limb haze from orbit.
   float mu = dot(-V, uSunDir);
   vec3 fogCol = atmoColor(uScatter, uSunset, uCamSunElev, mu, 1.0);
-  col = mix(col, fogCol, (1.0 - exp(-dist * uFog)) * (1.0 - uSpace));
+  fogCol += sunLight(uCamSunElev, uSunset) * pow(max(mu, 0.0), 12.0) * 0.25;
+  float od = hazeDepth(dist, uCamAlt, hgt, uH, uFog0);
+  col = mix(col, fogCol, (1.0 - exp(-od)) * (1.0 - uSpace * 0.85));
   float rim = pow(1.0 - max(dot(up, V), 0.0), 2.5) * 0.85 + 0.1;
-  vec3 rimCol = atmoColor(uScatter, uSunset, dot(up, uSunDir), mu, 0.4);
+  vec3 rimCol = atmoColor(uScatter, uSunset, sunE, mu, 0.4);
   col = mix(col, rimCol, rim * uSpace);
 
   gl_FragColor = vec4(col, 1.0);
@@ -148,12 +229,91 @@ void main() {
   se /= max(od, 1e-5);
   od *= L / 5.0 * uDensity / uH;
   float mu = dot(d, uSunDir);
-  vec3 col = atmoColor(uScatter, uSunset, se, mu, smoothstep(0.6, 5.0, od));
-  float dayS = smoothstep(-0.3, 0.1, se);
-  col += SUN_COLOR * (pow(max(mu, 0.0), 10.0) * 0.25 + pow(max(mu, 0.0), 220.0) * 2.0) * dayS;
+  vec3 col = atmoColor(uScatter, uSunset, se, mu, smoothstep(0.5, 4.5, od));
+  vec3 sunC = sunLight(se, uSunset);
+  float m = max(mu, 0.0);
+  col += sunC * (pow(m, 6.0) * 0.12 + pow(m, 40.0) * 0.35 + pow(m, 600.0) * 3.0);
   float a = min((1.0 - exp(-od)) * 1.12, 1.0) * smoothstep(-0.36, 0.02, se);
   gl_FragColor = vec4(col, a);
   ${OUT}
+}`;
+
+// ------------------------------------------------------------------- clouds
+// A single shell per world. Coverage comes from a baked cube map (seamless on
+// the sphere, one fetch); a tiling 2D texture erodes the edges up close.
+export const cloudFS = /* glsl */ `
+precision highp float;
+uniform sampler2D uDetail;
+uniform vec3 uCenter, uSunDir, uScatter, uSunset, uCloudTint;
+uniform float uTime, uCamSunElev, uR, uH, uCamAlt, uSpace, uFog0;
+varying vec3 vWorld;
+${ATMO}
+${CLOUD}
+void main() {
+  vec3 P = vWorld - uCenter;
+  float rP = length(P);
+  vec3 up = P / rP;
+  vec3 toCam = cameraPosition - vWorld;
+  float dist = length(toCam);
+  vec3 V = toCam / dist;
+  float base = cloudBase(up);
+  // triplanar erosion: soft billows from R, wispy breakup from G
+  vec3 qp = cloudRot(up) * (rP / 2600.0);
+  vec3 tw = up * up;
+  vec4 dt = texture2D(uDetail, qp.yz) * tw.x + texture2D(uDetail, qp.xz + uTime * 0.0006) * tw.y + texture2D(uDetail, qp.xy) * tw.z;
+  float nearD = 1.0 / (1.0 + dist / 30000.0);
+  float n = base + ((dt.r - 0.5) * 0.22 + (dt.g - 0.5) * 0.1) * nearD;
+  float dens = smoothstep(uCloudP.x, uCloudP.x + uCloudP.y, n);
+  float alpha = dens * uCloudP.z * smoothstep(20.0, 700.0, dist);
+  if (alpha < 0.004) discard;
+
+  float sunE = dot(up, uSunDir);
+  vec3 tang = uSunDir - up * sunE;
+  float occ = smoothstep(uCloudP.x - 0.04, uCloudP.x + uCloudP.y * 1.6, cloudBase(normalize(up + tang * 0.02)));
+  vec3 sunC = sunLight(sunE, uSunset);
+  vec3 sky = atmoColor(uScatter, uSunset, sunE, 0.0, 0.35);
+  float mu = dot(-V, uSunDir);
+  float below = 1.0 - smoothstep(-200.0, 200.0, uCamAlt - uCloudP.w);
+  // from above: bright tops, shaded where more cloud stands toward the sun
+  vec3 top = sunC * mix(2.9, 1.1, occ) + sky * 0.7;
+  // from below: thick cores are grey, thin edges glow, silver lining toward the sun
+  vec3 bottom = sunC * mix(2.6, 0.5, dens) * (1.0 - occ * 0.35) + sky * 0.75
+              + sunC * pow(max(mu, 0.0), 10.0) * (1.0 - dens) * 2.5;
+  vec3 col = uCloudTint * mix(top, bottom, below);
+
+  vec3 fogCol = atmoColor(uScatter, uSunset, uCamSunElev, mu, 1.0);
+  float od = hazeDepth(dist, uCamAlt, uCloudP.w, uH, uFog0);
+  col = mix(col, fogCol, (1.0 - exp(-od)) * (1.0 - uSpace * 0.85));
+  float rim = pow(1.0 - max(dot(up, V), 0.0), 2.5) * 0.8;
+  col = mix(col, atmoColor(uScatter, uSunset, sunE, mu, 0.4), rim * uSpace);
+  gl_FragColor = vec4(col, alpha);
+  ${OUT}
+}`;
+
+// Four independent noise fields baked into a cube map at startup:
+// R,G weather systems, B cumulus-scale billows, A fine breakup.
+export const cloudBakeFS = /* glsl */ `
+precision highp float;
+varying vec3 vLocal;
+float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float vnoise(vec3 x) {
+  vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+float fbm(vec3 p, int oct) {
+  float a = 0.5, s = 0.0, n = 0.0;
+  for (int i = 0; i < 6; i++) { if (i >= oct) break; s += a * vnoise(p); n += a; p = p * 2.03 + 7.1; a *= 0.5; }
+  return s / n;
+}
+void main() {
+  vec3 d = normalize(vLocal);
+  vec3 w = vec3(fbm(d * 2.6 + 1.7, 3), fbm(d * 2.6 + 9.2, 3), fbm(d * 2.6 - 4.1, 3)) - 0.5;
+  float a = fbm(d * 3.4 + w * 2.2, 5);
+  float b = fbm(d * 5.0 + 31.7 - w * 1.8, 5);
+  float c = fbm(d * 20.0 + w * 5.0, 3);
+  float e = fbm(d * 56.0 + 3.3, 2);
+  gl_FragColor = vec4(a, b, c, e);
 }`;
 
 // -------------------------------------------------- props, gates (lit solids)
@@ -162,8 +322,10 @@ attribute vec4 aColor;
 varying vec4 vColor;
 varying vec3 vNormal;
 varying vec3 vWorld;
+varying vec3 vLocal;
 void main() {
   vColor = aColor;
+  vLocal = position;
   #ifdef USE_INSTANCING
     mat4 m = modelMatrix * instanceMatrix;
   #else
@@ -175,32 +337,55 @@ void main() {
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
 
+// aColor.a > 0 is emissive glow; aColor.a < 0 marks foliage (light wraps
+// around and shines through it).
 export const propFS = /* glsl */ `
 precision highp float;
+uniform sampler2D uDetail;
 uniform vec3 uCenter, uSunDir, uScatter, uSunset, uTint;
-uniform float uFog, uCamSunElev, uShine, uFlash;
+uniform float uFog0, uCamSunElev, uShine, uFlash, uR, uH, uCamAlt, uGrain;
 varying vec4 vColor;
 varying vec3 vNormal;
 varying vec3 vWorld;
+varying vec3 vLocal;
 ${ATMO}
+${CLOUD}
 void main() {
   vec3 toCam = cameraPosition - vWorld;
   float dist = length(toCam);
   vec3 V = toCam / dist;
-  vec3 N = normalize(vNormal);
-  vec3 up = normalize(vWorld - uCenter);
+  vec3 P = vWorld - uCenter;
+  float rP = length(P);
+  vec3 up = P / rP;
+  float hgt = rP - uR;
+  float leaf = max(-vColor.a, 0.0), glow = max(vColor.a, 0.0);
+  vec2 uv = vec2(vLocal.x + vLocal.y, vLocal.z - vLocal.y);
+  vec4 d1 = texture2D(uDetail, uv * 0.11);
+  vec4 d2 = texture2D(uDetail, uv * 0.53);
+  float lod = 1.0 / (1.0 + dist * 0.02);
+  vec3 Nv = gl_FrontFacing ? vNormal : -vNormal;
+  vec3 N = normalize(Nv + (vec3(d2.b, d1.a, d2.a) - 0.5) * (0.5 + leaf * 0.5) * uGrain * lod);
   vec3 albedo = pow(vColor.rgb, vec3(2.2));
-  float day = smoothstep(-0.18, 0.12, dot(up, uSunDir));
-  float ndl = max(dot(N, uSunDir), 0.0);
-  vec3 sky = atmoColor(uScatter, uSunset, dot(up, uSunDir), 0.0, 0.3);
+  albedo *= 1.0 + ((d1.r - 0.5) * 0.5 + (d2.g - 0.5) * 0.6 * lod) * uGrain;
+  float sunE = dot(up, uSunDir);
+  vec3 sunC = sunLight(sunE, uSunset) * cloudShadow(P, up, hgt);
+  float nl = dot(N, uSunDir);
+  float wrap = 0.12 + leaf * 0.4;
+  float diff = max((nl + wrap) / (1.0 + wrap), 0.0);
+  vec3 sky = atmoColor(uScatter, uSunset, sunE, 0.0, 0.35);
+  float nu = dot(N, up);
+  vec3 light = sunC * diff * 2.5 + sky * (0.6 + 0.42 * nu) + sunC * (0.5 - 0.4 * nu) * max(sunE, 0.0) * 0.12 + 0.008;
   vec3 H = normalize(uSunDir + V);
-  float spec = pow(max(dot(N, H), 0.0), 60.0) * uShine * 2.0;
-  float fres = pow(1.0 - max(dot(N, V), 0.0), 4.0);
-  vec3 col = albedo * (SUN_COLOR * ndl * day * 1.7 + sky * (0.24 + 0.2 * dot(N, up)) + 0.014)
-           + SUN_COLOR * spec * day + sky * fres * uShine * 0.6;
-  col += albedo * vColor.a * 5.0 + uTint * uFlash * (0.4 + fres);
-  vec3 fogCol = atmoColor(uScatter, uSunset, uCamSunElev, dot(-V, uSunDir), 1.0);
-  col = mix(col, fogCol, 1.0 - exp(-dist * uFog));
+  float fres = pow(1.0 - max(dot(N, V), 0.0), 5.0);
+  float gloss = mix(18.0, 500.0, uShine * uShine);
+  float spec = pow(max(dot(N, H), 0.0), gloss) * (gloss + 8.0) * 0.012 * uShine;
+  vec3 col = albedo * light + sunC * spec * 3.0 + sky * fres * uShine * 0.8;
+  // sunlight through leaves when looking toward the sun
+  col += albedo * vec3(1.1, 1.25, 0.7) * sunC * leaf * pow(max(dot(-V, uSunDir), 0.0), 3.0) * 0.6;
+  col += albedo * glow * 5.0 + uTint * uFlash * (0.4 + fres);
+  float mu = dot(-V, uSunDir);
+  vec3 fogCol = atmoColor(uScatter, uSunset, uCamSunElev, mu, 1.0);
+  col = mix(col, fogCol, 1.0 - exp(-hazeDepth(dist, uCamAlt, hgt, uH, uFog0)));
   gl_FragColor = vec4(col, 1.0);
   ${OUT}
 }`;
@@ -267,7 +452,7 @@ void main() {
   float a = atan(p.y, p.x) / 6.2831853;
   float sw = a + r * 0.9 - uTime * 0.09;
   float n1 = texture2D(uDetail, vec2(sw * 2.0, r * 0.6 - uTime * 0.11)).r;
-  float n2 = texture2D(uDetail, vec2(-sw * 3.0 + 0.3, r * 1.3 + uTime * 0.07)).g;
+  float n2 = texture2D(uDetail, vec2(-sw * 1.5 + 0.3, r * 0.65 + uTime * 0.07 + 0.37)).r;
   float swirl = smoothstep(0.25, 0.85, n1 * 0.6 + n2 * 0.6);
   float edge = smoothstep(1.0, 0.86, r);
   float core = smoothstep(0.55, 0.0, r);
@@ -302,7 +487,7 @@ void main() {
   float ang = atan(d.y, d.x) / 6.2831853;
   float depth = d.z / max(length(d.xy), 0.04);
   float n1 = texture2D(uDetail, vec2(ang * 3.0 + depth * 0.05, depth * 0.11 + uTime * 0.9)).r;
-  float n2 = texture2D(uDetail, vec2(ang * 7.0 - depth * 0.03, depth * 0.23 + uTime * 1.7)).g;
+  float n2 = texture2D(uDetail, vec2(ang * 4.0 - depth * 0.03, depth * 0.12 + uTime * 0.9 + 0.41)).r;
   float streak = pow(clamp(n1 * 0.7 + n2 * 0.55, 0.0, 1.0), 4.0) * 1.5;
   vec3 tint = mix(uColor, uColor2, clamp(uMix + (n2 - 0.5) * 0.5, 0.0, 1.0));
   float ahead = smoothstep(0.75, 1.0, -d.z);
@@ -324,7 +509,7 @@ void main() {
   vec3 n = normalize(vLocal);
   float f = max(dot(n, normalize(cameraPosition - vWorld)), 0.0);
   float g = texture2D(uDetail, vUv * vec2(8.0, 4.0) + vec2(uTime * 0.004, 0.0)).r
-          * texture2D(uDetail, vUv * vec2(20.0, 10.0) - vec2(0.0, uTime * 0.006)).g;
+          * texture2D(uDetail, vUv * vec2(20.0, 10.0) - vec2(0.0, uTime * 0.006)).g * 1.3;
   vec3 col = mix(vec3(1.0, 0.45, 0.1), vec3(1.0, 0.93, 0.75), pow(f, 0.6)) * (2.2 + g * 5.0);
   gl_FragColor = vec4(col, 1.0);
   ${OUT}
@@ -350,7 +535,7 @@ varying vec3 vLocal;
 void main() {
   float r = length(vLocal.xy);
   float t = (r - 1.35) / 1.05;
-  float bands = texture2D(uDetail, vec2(t * 1.7, 0.31)).r * 0.7 + texture2D(uDetail, vec2(t * 9.0, 0.77)).g * 0.5;
+  float bands = texture2D(uDetail, vec2(t * 1.7, 0.31)).r * 0.7 + texture2D(uDetail, vec2(t * 4.0, 0.77)).g * 0.5;
   float a = smoothstep(0.0, 0.06, t) * smoothstep(1.0, 0.9, t) * smoothstep(0.3, 0.75, bands);
   // Planet shadow across the rings.
   vec3 p = vWorld - uCenter;
@@ -398,8 +583,8 @@ void main() {
   float n = fbm(q);
   float band = exp(-pow(abs(d.y * 0.9 + 0.25 * d.x + (fbm(d * 3.0) - 0.5) * 0.5) * 2.6, 2.0));
   float cloud = smoothstep(0.42, 0.85, n) * (0.25 + band);
-  vec3 c1 = vec3(0.10, 0.16, 0.42), c2 = vec3(0.45, 0.12, 0.40), c3 = vec3(0.05, 0.32, 0.36);
-  vec3 col = mix(mix(c1, c2, fbm(d * 1.6 + 20.0)), c3, smoothstep(0.4, 0.8, fbm(d * 1.3 - 9.0))) * cloud * 0.55;
+  vec3 c1 = vec3(0.10, 0.14, 0.30), c2 = vec3(0.30, 0.14, 0.24), c3 = vec3(0.10, 0.22, 0.26);
+  vec3 col = mix(mix(c1, c2, fbm(d * 1.6 + 20.0)), c3, smoothstep(0.4, 0.8, fbm(d * 1.3 - 9.0))) * cloud * 0.3;
   col += vec3(0.9, 0.8, 1.0) * band * smoothstep(0.5, 0.9, fbm(d * 40.0)) * 0.05;
   // Dense faint star dust (crisp bright stars are separate points).
   vec3 g = d * 260.0; vec3 id = floor(g); float h = hash(id);

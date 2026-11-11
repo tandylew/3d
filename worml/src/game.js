@@ -35,7 +35,7 @@ export class Game {
     this.detail = makeDetailTexture(renderer);
     this.manager = new TerrainManager(2);
     this.sky = new Sky(renderer, scene, this.detail);
-    this.planets = PLANETS.map((def, i) => new Planet(def, i, this.manager, this.detail, scene));
+    this.planets = PLANETS.map((def, i) => new Planet(def, i, this.manager, this.detail, scene, this.sky.cloudMap));
     this.gates = new Map(); this.fields = new Map();
     for (const p of this.planets) {
       const g = new Gate(p, this.detail);
@@ -66,7 +66,9 @@ export class Game {
     this.state = freshState();
     try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
     for (const [id, g] of this.gates) g.setOpen(!!this.state.open[id], true);
+    for (const g of this.gates.values()) g.setDest(null);
     this.updateDests();
+    this.pendingUnlock = null;
   }
 
   save() { this.saveT = 0.5; }
@@ -78,8 +80,23 @@ export class Game {
   }
 
   labels() {
-    return this.renderer.xr.isPresenting ? { fly: 'point & squeeze TRIGGER', grip: 'GRIP', act: 'A' } : { fly: 'look & hold W', grip: 'E', act: 'F' };
+    if (this.renderer.xr.isPresenting) return { fly: 'point & squeeze TRIGGER', grip: 'GRIP', act: 'A' };
+    if (this.input.touch.on) return { fly: 'look & hold FLY', grip: 'GATHER', act: 'GATE' };
+    return { fly: 'look & hold W', grip: 'E', act: 'F' };
   }
+
+  // ---- dev dashboard helpers
+  nextSealed() { const id = QUEST.find((q) => !this.state.open[q]); return id ? this.gates.get(id) : null; }
+
+  grant(n) { for (const el of ELEMENT_ORDER) this.state.inv[el] = el === 'magic' ? 0 : Math.max(0, Math.min(CAP, n)); this.save(); }
+
+  grantFor(gate) {
+    const needs = gate.planet.def.needs || {}, ch = this.state.charge[gate.planet.def.id];
+    for (const el of Object.keys(needs)) this.state.inv[el] = Math.max(this.state.inv[el], needs[el] - (ch[el] || 0));
+    this.save();
+  }
+
+  unlockNext() { const g = this.nextSealed(); if (g) this.unlock(g); return g; }
 
   begin() {
     if (this.started) return;

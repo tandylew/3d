@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { FACES, patchDir, patchIndices } from './cubesphere.js';
 import { smoothstep } from './noise.js';
-import { terrainVS, terrainFS, atmoVS, atmoFS, uvVS, ringFS } from './shaders.js';
+import { terrainVS, terrainFS, atmoVS, atmoFS, cloudFS, uvVS, ringFS } from './shaders.js';
 
 const MAX_LEVEL = 11;
 const SPLIT = 1.4;
@@ -94,7 +94,7 @@ export class TerrainManager {
 }
 
 export class Planet {
-  constructor(def, index, manager, detailTex, scene) {
+  constructor(def, index, manager, detailTex, scene, cloudMap) {
     this.def = def; this.index = index; this.manager = manager;
     this.pos = new THREE.Vector3(def.pos[0], def.pos[1], def.pos[2]);
     this.sunDir = new THREE.Vector3(def.sunDir[0], def.sunDir[1], def.sunDir[2]);
@@ -105,15 +105,25 @@ export class Planet {
     this.camDir = new THREE.Vector3();
     this.missing = 0;
 
-    const a = def.atmo;
+    const a = def.atmo, L = def.look, C = L.clouds;
+    this.baseSun = this.sunDir.clone();
     this.uniforms = {
+      uCloudMap: { value: cloudMap },
+      uCloudMix: { value: new THREE.Vector4(...C.mix) },
+      uCloudP: { value: new THREE.Vector4(C.threshold, C.soft, C.opacity, C.alt) },
+      uCloudCS: { value: new THREE.Vector2(1, 0) },
+      uCloudTint: { value: new THREE.Vector3(...C.tint) },
+      uRockCol: { value: new THREE.Vector3(...L.rock.map((c) => Math.pow(c, 2.2))) },
+      uRockP: { value: new THREE.Vector3(...L.rockP) },
+      uStrata: { value: L.strata }, uLiquid: { value: def.liquid ? 1 : 0 }, uMetal: { value: L.metal || 0.03 },
+      uFog0: { value: a.density / 9000 }, uCamAlt: { value: 0 },
       uDetail: { value: detailTex },
       uCenter: { value: new THREE.Vector3() },
       uSunDir: { value: this.sunDir },
       uScatter: { value: new THREE.Vector3(...a.scatter) },
       uSunset: { value: new THREE.Vector3(...a.sunset) },
       uGlowColor: { value: new THREE.Vector3(...def.glow) },
-      uFog: { value: 0 }, uSpace: { value: 1 }, uTime: { value: 0 }, uCamSunElev: { value: 1 },
+      uSpace: { value: 1 }, uTime: { value: 0 }, uCamSunElev: { value: 1 },
       uR: { value: def.radius }, uRa: { value: def.radius + a.height * 8 }, uH: { value: a.height },
       uDensity: { value: a.density },
     };
@@ -128,7 +138,21 @@ export class Planet {
     );
     shell.scale.setScalar((def.radius + a.height * 8) * 1.03);
     shell.frustumCulled = false;
+    shell.renderOrder = -4;
     this.group.add(shell);
+    this.shell = shell;
+
+    this.clouds = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 96, 64),
+      new THREE.ShaderMaterial({
+        vertexShader: atmoVS, fragmentShader: cloudFS, uniforms: this.uniforms,
+        side: THREE.DoubleSide, transparent: true, depthWrite: false,
+      }),
+    );
+    this.clouds.scale.setScalar(def.radius + C.alt);
+    this.clouds.frustumCulled = false;
+    this.clouds.renderOrder = -3;
+    this.group.add(this.clouds);
 
     if (def.rings) {
       const ring = new THREE.Mesh(
@@ -141,6 +165,7 @@ export class Planet {
       ring.scale.setScalar(def.radius);
       ring.rotation.set(1.25, 0.35, 0);
       ring.frustumCulled = false;
+      ring.renderOrder = -2;
       this.group.add(ring);
     }
 
@@ -160,7 +185,9 @@ export class Planet {
     u.uCenter.value.copy(this.group.position);
     u.uTime.value = time;
     u.uSpace.value = smoothstep(H * 1.5, H * 7, alt);
-    u.uFog.value = (def.atmo.density / 9000) * Math.exp(-Math.max(alt, 0) / H);
+    u.uCamAlt.value = alt;
+    const ca = time * def.look.clouds.drift;
+    u.uCloudCS.value.set(Math.cos(ca), Math.sin(ca));
     u.uCamSunElev.value = this.camDir.dot(this.sunDir);
 
     const rMin = def.radius - 700;

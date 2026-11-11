@@ -6,10 +6,13 @@ import * as THREE from 'three';
 import { SUN, groundHeight } from './worlds.js';
 import { smoothstep } from './noise.js';
 
-const V0 = 26;          // m/s top speed at ground level
-const RATE = 0.8;       // 1/s : speed limit gained per metre of altitude
-const VMAX = 5e6;
-const WALK = 7;
+// Live-tunable from the dev dashboard.
+export const FLIGHT = {
+  V0: 26,          // m/s top speed at ground level
+  RATE: 0.8,       // 1/s : speed limit gained per metre of altitude
+  VMAX: 5e6,
+  WALK: 7,
+};
 const SNAP = Math.PI / 6;
 
 const up = new THREE.Vector3(), rel = new THREE.Vector3(), tv = new THREE.Vector3();
@@ -25,7 +28,7 @@ export class Player {
     this.vel = new THREE.Vector3();
     this.up = new THREE.Vector3(0, 1, 0);
     this.fall = 0; this.grounded = false; this.frozen = false;
-    this.planet = planets[0]; this.alt = 0; this.speed = 0; this.vLimit = V0;
+    this.planet = planets[0]; this.alt = 0; this.speed = 0; this.vLimit = FLIGHT.V0;
     this.aimTarget = null; this.thrusting = false;
   }
 
@@ -75,6 +78,7 @@ export class Player {
     let ground = groundHeight(P.def, up.x, up.y, up.z);
     let alt = dist - R - ground;
     const sunAlt = this.pos.length() - SUN.radius * 1.25;
+    const { V0, RATE, VMAX, WALK } = FLIGHT;
     const vLimit = Math.min(VMAX, V0 + RATE * Math.max(0, Math.min(alt, sunAlt)));
     this.vLimit = vLimit;
 

@@ -199,6 +199,7 @@ export class Combat {
     const rgb = el ? ELEMENTS[el].rgb : [0.85, 0.9, 1.0];
     this.bolts.push({ pos: origin.clone().addScaledVector(dir, 1.2), vel: dir.clone().multiplyScalar(34).add(this.game.player.vel), life: 0.42 + power * 0.1, from: 'slash', el, rgb,
       sweep: sweep.clone().normalize(), half: 2.2 + power * 1.6, size: 0.3, dmg: (16 + 22 * power) * (perfect ? 1.7 : 1), perfect, hits: new Set() });
+    this.slashCount = (this.slashCount || 0) + 1;
     this.game.audio.sweep(0.22, 2600, 500, 0.22);
   }
 

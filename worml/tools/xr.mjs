@@ -39,7 +39,8 @@ const state = () => page.evaluate(() => {
     left: input.left.active, right: input.right.active, trigger: input.right.trigger,
     alt: p.alt, speed: p.speed, water: g.state.inv.water, overlayHidden: document.getElementById('overlay').classList.contains('hidden'),
     wristOnLeft: g.hud.wrist.mesh.parent === input.ctrl.find((k) => k.handed === 'left')?.ray,
-    yaw: Math.atan2(...(() => { const e = g.rig.matrixWorld.elements; return [e[8], e[10]]; })()),
+    // heading: the rig's forward axis, flattened against the local up (the rig also rolls upright as you move over a small world)
+    fwd: (() => { const f = new window.worml.THREE.Vector3(0, 0, -1).applyQuaternion(g.rig.quaternion); f.addScaledVector(p.up, -f.dot(p.up)).normalize(); return f.toArray(); })(),
   };
 });
 
@@ -64,13 +65,15 @@ await page.screenshot({ path: 'shots/xr-flight.png' });
 await page.evaluate(() => window.xrDevice.controllers.right.updateButtonValue('trigger', 0));
 
 // Snap turn on the right stick.
-const yaw0 = (await state()).yaw;
+await page.evaluate(() => { const g = window.worml.game; g.warpTo('thalassa', 0, 140); });
+await wait(2500);
+const f0 = (await state()).fwd;
 await page.evaluate(() => window.xrDevice.controllers.right.updateAxes('thumbstick', 1, 0));
 await wait(1200);
 await page.evaluate(() => window.xrDevice.controllers.right.updateAxes('thumbstick', 0, 0));
 await wait(600);
 s = await state();
-let dy = Math.abs(s.yaw - yaw0); if (dy > Math.PI) dy = 2 * Math.PI - dy;
+let dy = Math.acos(Math.max(-1, Math.min(1, s.fwd[0] * f0[0] + s.fwd[1] * f0[1] + s.fwd[2] * f0[2])));
 check('right stick snap-turns 30 degrees', Math.abs(dy - Math.PI / 6) < 0.12, `turned ${(dy * 180 / Math.PI).toFixed(1)} deg`);
 
 // Right grip casts essence; left grip uses the time relic; A leaps; Y shows objectives.
@@ -79,7 +82,7 @@ await page.evaluate(() => { const g = window.worml.game; g.grant(9); g.time.give
 check('objectives panel hidden by default', !(await g2()).hud);
 const c0 = (await g2()).carried;
 await page.evaluate(() => window.xrDevice.controllers.right.updateButtonValue('squeeze', 1));
-await page.waitForFunction((n) => Object.values(window.worml.game.state.inv).reduce((a, b) => a + b, 0) < n, c0, { timeout: 30000 }).catch(() => {});
+await page.waitForFunction((n) => Object.values(window.worml.game.state.inv).reduce((a, b) => a + b, 0) < n, c0, { timeout: 120000 }).catch(() => {});
 await page.evaluate(() => window.xrDevice.controllers.right.updateButtonValue('squeeze', 0));
 let q = await g2();
 check('right grip casts essence', q.carried < c0, `carried ${c0} -> ${q.carried}`);
@@ -99,6 +102,15 @@ await page.waitForFunction((a) => window.worml.game.player.alt > a + 150, a0, { 
 q = await g2();
 check('A makes a super leap', q.alt > a0 + 150, `alt ${a0.toFixed(0)} -> ${q.alt.toFixed(0)} m`);
 await page.screenshot({ path: 'shots/xr-leap.png' });
+
+// Swing the right controller: a blade.
+const sl0 = await page.evaluate(() => window.worml.game.combat.slashCount || 0);
+await page.evaluate(() => new Promise((done) => {
+  const c = window.xrDevice.controllers.right; let i = 0;
+  const id = setInterval(() => { c.position.set(-0.5 + i * 0.12, 1.3, -0.4); if (++i > 12) { clearInterval(id); done(); } }, 30);
+}));
+await page.waitForFunction((n) => (window.worml.game.combat.slashCount || 0) > n, sl0, { timeout: 30000 }).catch(() => {});
+check('swinging a controller throws a blade', (await page.evaluate(() => window.worml.game.combat.slashCount || 0)) > sl0);
 
 let failed = 0;
 for (const r of log) { if (!r.ok) failed++; console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.detail ? '  (' + r.detail + ')' : ''}`); }

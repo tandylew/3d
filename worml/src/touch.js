@@ -82,7 +82,7 @@ export class TouchControls {
         const s = e.clientX < innerWidth / 2 ? this.left : this.right;
         if (s === this.right) {
           // double tap on the look side: super leap
-          const now = performance.now();
+          const now = e.timeStamp;      // when the finger landed, not when a busy frame got round to it
           if (now - this.lastTap < 320 && Math.abs(e.clientX - this.lastTapX) < 90) { t.jump = true; this.lastTap = 0; } else { this.lastTap = now; this.lastTapX = e.clientX; }
         }
         if (s.id === null) { s.start(e); return; }
@@ -106,7 +106,8 @@ export class TouchControls {
       const f = this.free.get(e.pointerId); if (!f) return;
       this.free.delete(e.pointerId);
       if (!f.gesture) return;
-      const dur = (performance.now() - f.t0) / 1000;
+      // the charge shown by the ring is the one that counts
+      const dur = this.holder === e.pointerId && t.holdT >= 0 ? t.holdT : (performance.now() - f.t0) / 1000;
       if (this.holder === e.pointerId) { this.holder = null; }
       if (f.moved > 40) {
         const [x1, y1] = ndc(e);

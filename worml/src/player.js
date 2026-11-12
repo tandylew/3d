@@ -151,7 +151,7 @@ export class Player {
     const stroll = this.grounded ? WALK : Math.max(WALK, vLimit * 0.4);
     tv.addScaledVector(b, input.move.y * stroll).addScaledVector(c, input.move.x * stroll);
     if (input.lift) { tv.addScaledVector(rigUp, input.lift * Math.max(WALK, vLimit * 0.4)); flying = true; }
-    if (inside && (input.move.lengthSq() > 0.01)) flying = true;
+    if (inside && dist < CORE_R && input.move.lengthSq() > 0.01) flying = true;   // drifting about the core; in the shaft the stick doesn't hold you up
 
     // --- super jump: several seconds of full climb, leaning where you look
     if (this.jumpT > 0 && !inside) {

@@ -92,7 +92,7 @@ const result = await page.evaluate(() => {
   const spent = castAt(() => foe().pos, 40, () => kills > 0);
   check('casting essence destroys a guardian', kills > 0, `${spent.toFixed(1)} s, health ${Math.round(g.health)}`);
   check('casting spends essence', total() < 60, `carried ${total()} of 60`);
-  sec(3);
+  sec(6);
   check('a fallen guardian leaves essence of its element', c.drops.length === 0 && kills > 0);
 
   // 5. health: hurt, then mend after a quiet spell

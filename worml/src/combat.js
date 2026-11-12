@@ -315,7 +315,7 @@ export class Combat {
     for (const d of this.drops) {
       d.t += raw;
       const dd = d.pos.distanceTo(head);
-      if (dd < 16) d.pos.lerp(head, 1 - Math.exp(-raw * (dd < 6 ? 8 : 2.5)));
+      if (dd < 40) d.pos.lerp(head, 1 - Math.exp(-raw * (dd < 6 ? 8 : 2.5)));
       if (dd < 1.2) { d.t = 1e9; g.gain(d.el, 1); }
     }
     this.drops = this.drops.filter((d) => d.t < 90);

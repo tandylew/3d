@@ -230,6 +230,9 @@ export class Props {
         if (def.liquid && raw < 1.5) continue;
         const gd = Math.hypot(pv.x - g.x, pv.y - g.y, pv.z - g.z) * R;
         if (gd < 48) continue;
+        let clear = true;
+        for (const q of def.sites) if (Math.hypot(pv.x - q.x, pv.y - q.y, pv.z - q.z) * R < q.r0 * 0.9) { clear = false; break; }
+        if (!clear) continue;
         sv.copy(pv).addScaledVector(t1, 4 / R).normalize();
         if (Math.abs(terrainRaw(def, sv.x, sv.y, sv.z) - raw) > (isBig ? 2.6 : 4)) continue;
         qv.setFromUnitVectors(Y, pv).multiply(qy.setFromAxisAngle(Y, hash3(cx, cy, cz, 4) * 6.283));
@@ -249,3 +252,6 @@ export class Props {
     this.count = nb + ns;
   }
 }
+
+// The broadleaf tree, for time effects that grow one on demand.
+export function treeGeometry() { return MAKERS.wood.big(); }

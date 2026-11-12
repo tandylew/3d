@@ -4,7 +4,8 @@
 import * as THREE from 'three';
 import { FACES, patchDir, patchIndices } from './cubesphere.js';
 import { smoothstep } from './noise.js';
-import { terrainVS, terrainFS, atmoVS, atmoFS, cloudFS, uvVS, ringFS } from './shaders.js';
+import { terrainVS, terrainFS, atmoVS, atmoFS, cloudFS, coreFS, uvVS, ringFS } from './shaders.js';
+import { SHAFT_R, CORE_R } from './worlds.js';
 
 const MAX_LEVEL = 11;
 const SPLIT = 1.4;
@@ -112,6 +113,9 @@ export class Planet {
       uCloudMix: { value: new THREE.Vector4(...C.mix) },
       uCloudP: { value: new THREE.Vector4(C.threshold, C.soft, C.opacity, C.alt) },
       uCloudCS: { value: new THREE.Vector2(1, 0) },
+      uSites: { value: Array.from({ length: 10 }, (_, i) => { const q = def.sites[i]; return q ? new THREE.Vector4(q.x, q.y, q.z, q.kind === 'anomaly' ? 0.7 : 1) : new THREE.Vector4(0, 1, 0, 0); }) },
+      uShaft: { value: new THREE.Vector4(def.gate.x, def.gate.y, def.gate.z, 0) },
+      uCoreR: { value: CORE_R }, uChamber: { value: 0 },
       uCloudTint: { value: new THREE.Vector3(...C.tint) },
       uRockCol: { value: new THREE.Vector3(...L.rock.map((c) => Math.pow(c, 2.2))) },
       uRockP: { value: new THREE.Vector3(...L.rockP) },
@@ -169,11 +173,32 @@ export class Planet {
       this.group.add(ring);
     }
 
+    // The well: a shaft from the wellhead down to a hollow, glowing core.
+    const axis = new THREE.Vector3(def.gate.x, def.gate.y, def.gate.z);
+    const r0 = Math.sqrt(CORE_R * CORE_R - SHAFT_R * SHAFT_R) - 2, r1 = def.radius + def.gate.h + 0.5;
+    const coreMat = (chamber) => new THREE.ShaderMaterial({
+      vertexShader: atmoVS, fragmentShader: coreFS, side: THREE.BackSide,
+      uniforms: { ...this.uniforms, uChamber: { value: chamber } },
+    });
+    this.shaft = new THREE.Mesh(new THREE.CylinderGeometry(SHAFT_R, SHAFT_R, r1 - r0, 28, 1, true), coreMat(0));
+    this.shaft.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
+    this.shaft.position.copy(axis).multiplyScalar((r0 + r1) / 2);
+    this.chamber = new THREE.Mesh(new THREE.SphereGeometry(CORE_R, 56, 36), coreMat(1));
+    this.shaft.frustumCulled = this.chamber.frustumCulled = false;
+    this.shaft.visible = this.chamber.visible = false;
+    this.group.add(this.shaft, this.chamber);
+    this.shaftOpen = false;
+
     this.roots = FACES.map((_, f) => new Node(this, f, 0, 0, 0));
   }
 
   // `playerPos` is the floating origin: everything is drawn relative to it so
   // the GPU only ever sees small, precise numbers near the player.
+  setShaft(open) {
+    this.shaftOpen = open;
+    this.uniforms.uShaft.value.w = open ? SHAFT_R : 0;
+  }
+
   update(playerPos, time) {
     const def = this.def;
     this.group.position.copy(this.pos).sub(playerPos);

@@ -1,7 +1,8 @@
-// Wormhole gates: one per world. Each (except home) starts locked by an
-// elemental affliction that only the complementary element can undo.
+// Wormhole gates: one per world, hanging in its hollow core. On the surface a
+// wellhead marks the shaft down to it; each (except home) starts capped by an
+// elemental seal that only the element which overcomes it can break.
 import * as THREE from 'three';
-import { ELEMENTS } from './worlds.js';
+import { ELEMENTS, SHAFT_R } from './worlds.js';
 import { Builder, propMaterial, glowMaterial, additive, ENV } from './gfx.js';
 import { uvVS, portalFS, beaconFS } from './shaders.js';
 import { mulberry32, smoothstep } from './noise.js';
@@ -78,6 +79,23 @@ function affliction(element, seed) {
   return b.build();
 }
 
+
+// The surface structure around the mouth of the shaft.
+function wellhead(color) {
+  const b = new Builder();
+  const stone = [0.22, 0.22, 0.25], dark = [0.1, 0.1, 0.13], R = SHAFT_R + 1.8;
+  b.add(new THREE.TorusGeometry(R, 1.9, 10, 64), stone, 0, 0, 0.5, 0, 1, 1, 0.6, Math.PI / 2, 0, 0);
+  b.add(new THREE.TorusGeometry(SHAFT_R + 0.2, 0.3, 6, 64), color, 0.9, 0, 0.9, 0, 1, 1, 1, Math.PI / 2, 0, 0);
+  b.add(new THREE.TorusGeometry(R + 5.5, 0.5, 6, 64), dark, 0, 0, 0.1, 0, 1, 1, 0.5, Math.PI / 2, 0, 0);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + 0.39, x = Math.cos(a) * (R + 3.2), z = Math.sin(a) * (R + 3.2), tall = i % 2 ? 9 : 5.5;
+    b.column(new THREE.BoxGeometry(2.0, tall, 2.0), tall, i % 2 ? stone : dark, 0, x, 0, z, -a);
+    b.add(new THREE.OctahedronGeometry(0.8, 0), color, 0.9, x, tall + 1.4, z, 1, 1.5, 1);
+    b.column(new THREE.BoxGeometry(0.35, tall * 0.8, 2.1), tall * 0.8, color, 0.7, x * 0.985, 0.4, z * 0.985, -a);
+  }
+  return b.build();
+}
+
 export class Gate {
   constructor(planet, detailTex) {
     this.planet = planet;
@@ -87,55 +105,70 @@ export class Gate {
     this.up = new THREE.Vector3(g.x, g.y, g.z);
     this.z = planet.sunDir.clone().addScaledVector(this.up, -planet.sunDir.dot(this.up)).normalize();
     this.x = new THREE.Vector3().crossVectors(this.up, this.z);
-    this.base = this.up.clone().multiplyScalar(def.radius + g.h + 0.05);      // planet-local
-    this.center = this.base.clone().addScaledVector(this.up, RING_Y);
-    this.group = new THREE.Group();
-    this.group.position.copy(this.base);
-    this.group.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(this.x, this.up, this.z));
-    planet.group.add(this.group);
-    this.inv = new THREE.Matrix4();
+    const basis = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(this.x, this.up, this.z));
+    this.inv = new THREE.Matrix4().makeRotationFromQuaternion(basis).invert();
 
-    this.open = false; this.unlockT = -1; this.dest = null;
-    this.mat = propMaterial(0.45);
-    this.group.add(new THREE.Mesh(structure(this.color), this.mat));
+    // ---- the wellhead on the surface (planet-local)
+    this.site = this.up.clone().multiplyScalar(def.radius + g.h + 0.05);
+    this.siteGroup = new THREE.Group();
+    this.siteGroup.position.copy(this.site);
+    this.siteGroup.quaternion.copy(basis);
+    planet.group.add(this.siteGroup);
+    this.siteMat = propMaterial(0.45);
+    this.siteGroup.add(new THREE.Mesh(wellhead(this.color), this.siteMat));
 
     const ag = affliction(def.element, def.seed);
     this.aff = null;
     if (ag) {
+      // the seals were modelled around an upright ring; laid flat they cap the well
       this.affMat = propMaterial(def.element === 'metal' ? 0.9 : 0.25);
-      this.aff = new THREE.Mesh(ag, this.affMat);
-      this.group.add(this.aff);
+      this.aff = new THREE.Group();
+      this.aff.rotation.x = -Math.PI / 2;
+      this.aff.add(new THREE.Mesh(ag, this.affMat));
+      this.siteGroup.add(this.aff);
+      this.sealScale(1);
     }
 
-    this.portalU = { uDetail: { value: detailTex }, uColor: { value: new THREE.Vector3(...this.color) }, uColor2: { value: new THREE.Vector3(1, 1, 1) }, uTime: ENV.uTime, uOpen: { value: 0 } };
+    this.beaconU = { uColor: { value: new THREE.Vector3(...this.color) }, uTime: ENV.uTime, uAlpha: { value: 0.5 } };
+    this.beacon = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 14, 1, true).translate(0, 0.5, 0),
+      new THREE.ShaderMaterial({ vertexShader: uvVS, fragmentShader: beaconFS, uniforms: this.beaconU, side: THREE.DoubleSide, ...additive }));
+    this.beacon.position.y = 4;
+    this.beacon.frustumCulled = false;
+    this.siteGroup.add(this.beacon);
+
+    // ---- the ring in the core: its centre is the centre of the world
+    this.center = new THREE.Vector3();
+    this.base = this.up.clone().multiplyScalar(-RING_Y);
+    this.group = new THREE.Group();
+    this.group.position.copy(this.base);
+    this.group.quaternion.copy(basis);
+    planet.group.add(this.group);
+    this.open = false; this.unlockT = -1; this.next = null; this.prev = null; this.lastZ = 1;
+    this.mat = propMaterial(0.45);
+    this.group.add(new THREE.Mesh(structure(this.color), this.mat));
+
+    this.portalU = { uDetail: { value: detailTex }, uColor: { value: new THREE.Vector3(...this.color) }, uColor2: { value: new THREE.Vector3(1, 1, 1) },
+      uColor3: { value: new THREE.Vector3(1, 1, 1) }, uTime: ENV.uTime, uOpen: { value: 0 } };
     this.portal = new THREE.Mesh(new THREE.CircleGeometry(RING_R - 0.6, 56),
       new THREE.ShaderMaterial({ vertexShader: uvVS, fragmentShader: portalFS, uniforms: this.portalU, side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor }));
     this.portal.position.y = RING_Y;
     this.portal.renderOrder = 5;
     this.group.add(this.portal);
 
-    this.beaconU = { uColor: { value: new THREE.Vector3(...this.color) }, uTime: ENV.uTime, uAlpha: { value: 0.5 } };
-    this.beacon = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 14, 1, true).translate(0, 0.5, 0),
-      new THREE.ShaderMaterial({ vertexShader: uvVS, fragmentShader: beaconFS, uniforms: this.beaconU, side: THREE.DoubleSide, ...additive }));
-    this.beacon.position.y = RING_Y * 2 + 2;
-    this.beacon.frustumCulled = false;
-    this.group.add(this.beacon);
-
     this.partMat = glowMaterial(LOCK_COLOR[def.element], 1.6, 0.55);
     this.parts = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), this.partMat, PARTICLES);
     this.parts.frustumCulled = false;
-    this.group.add(this.parts);
+    this.siteGroup.add(this.parts);
     const rnd = mulberry32(def.seed + 5);
     this.seeds = Array.from({ length: PARTICLES }, () => [rnd(), rnd(), rnd(), rnd()]);
-
-    this.orbMat = glowMaterial([1, 1, 1], 1.5, 1.6);
-    this.orbs = Array.from({ length: 8 }, () => {
-      const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5, 1), this.orbMat.clone());
-      m.visible = false; m.userData = { t: 1, from: new THREE.Vector3() };
-      this.group.add(m);
-      return m;
-    });
     this.setOpen(false, true);
+  }
+
+  sealScale(k) {
+    if (!this.aff) return;
+    const sc = ((SHAFT_R + 1) / RING_R) * Math.max(k, 0.001);
+    this.aff.scale.setScalar(sc);
+    this.aff.position.set(0, 1.0, RING_Y * sc);
   }
 
   setOpen(open, instant = false) {
@@ -144,89 +177,76 @@ export class Gate {
       if (this.aff) this.aff.visible = !open;
       this.portalU.uOpen.value = open ? 1 : 0;
       this.unlockT = -1;
+      this.planet.setShaft(open);
+      (open ? this.group : this.siteGroup).add(this.parts);
     } else if (open) this.unlockT = 0;
     this.partMat.uniforms.uColor.value.set(...(open ? this.color : LOCK_COLOR[this.element]));
-    this.beaconU.uAlpha.value = open ? 1.0 : 0.4;
+    this.partMat.uniforms.uGain.value = open ? 1.0 : 0.55;
   }
 
-  setDest(gate) {
-    this.dest = gate;
-    this.portalU.uColor2.value.set(...(gate ? gate.color : this.color.map((c) => c * 0.35)));
+  // The front face leads onward along the chain of linked worlds, the back face leads back.
+  setDests(next, prev) {
+    this.next = next; this.prev = prev;
+    const dim = this.color.map((c) => c * 0.35);
+    this.portalU.uColor2.value.set(...(next ? next.color : dim));
+    this.portalU.uColor3.value.set(...(prev ? prev.color : dim));
   }
 
-  // Planet-local point -> gate-local.
+  // Planet-local point -> ring-local (origin at the ring's base).
   toLocal(v, out) {
     return out.copy(v).sub(this.base).applyMatrix4(this.inv);
   }
 
-  // A spot `dist` metres in front of the portal, as a unit direction on the planet.
+  // A spot `dist` metres from the wellhead on the surface, as a unit direction on the planet.
   frontDir(dist) {
-    return this.base.clone().addScaledVector(this.z, dist).normalize();
-  }
-
-  sendOrb(fromLocal, rgb) {
-    const o = this.orbs.find((m) => !m.visible) || this.orbs[0];
-    o.userData.t = 0; o.userData.from.copy(fromLocal);
-    o.material.uniforms.uColor.value.set(...rgb);
-    o.visible = true;
+    return this.site.clone().addScaledVector(this.z, dist).normalize();
   }
 
   flash(rgb) {
-    this.mat.uniforms.uTint.value.set(...rgb);
-    this.mat.uniforms.uFlash.value = 1;
+    for (const m of [this.siteMat, this.affMat]) if (m) { m.uniforms.uTint.value.set(...rgb); m.uniforms.uFlash.value = 1; }
   }
 
+  // headLocal: planet-local head position. Returns distance to the wellhead.
   update(dt, time, headLocal) {
-    this.inv.makeRotationFromQuaternion(this.group.quaternion).invert();
-    const dist = headLocal.distanceTo(this.center);
-    // Beacon: a pillar of light that widens with distance so the gate can be found from orbit.
-    const w = THREE.MathUtils.clamp(dist * 0.005, 0.7, 900);
+    const dist = headLocal.distanceTo(this.site);
+    // Beacon: a pillar of light that widens with distance so the wellhead can be found from orbit.
+    const w = THREE.MathUtils.clamp(dist * 0.005, this.open ? SHAFT_R * 0.5 : 0.7, 900);
     this.beacon.scale.set(w, 700 + dist * 0.9, w);
-    this.beaconU.uAlpha.value = (this.open ? 1.0 : 0.45) * smoothstep(25, 260, dist);
+    this.beaconU.uAlpha.value = (this.open ? 1.0 : 0.45) * smoothstep(25, 260, dist) * (headLocal.length() > this.site.length() - 30 ? 1 : 0);
 
-    this.mat.uniforms.uFlash.value *= Math.exp(-dt * 2.5);
+    for (const m of [this.siteMat, this.affMat]) if (m) m.uniforms.uFlash.value *= Math.exp(-dt * 2.5);
     if (this.unlockT >= 0) {
       this.unlockT += dt;
       const t = Math.min(1, this.unlockT / 3.4);
       if (this.aff) {
-        const s = 1 - smoothstep(0.1, 0.95, t);
-        this.aff.scale.set(0.3 + 0.7 * s, Math.max(s, 0.001), 0.3 + 0.7 * s);
+        this.sealScale(1 - smoothstep(0.1, 0.95, t));
         this.affMat.uniforms.uFlash.value = Math.sin(t * Math.PI) * 2.5;
         this.aff.visible = t < 0.95;
       }
+      if (t > 0.6 && !this.planet.shaftOpen) { this.planet.setShaft(true); this.group.add(this.parts); }
       this.portalU.uOpen.value = smoothstep(0.55, 1, t);
       if (t >= 1) this.unlockT = -1;
     }
 
     const fire = this.element === 'fire' && !this.open;
+    const swirl = this.parts.parent === this.group;
     for (let i = 0; i < PARTICLES; i++) {
       const s = this.seeds[i];
       let sc;
-      if (this.open) {
+      if (swirl) {
         const f = (s[2] + time * (0.08 + s[3] * 0.1)) % 1, a = s[0] * 6.283 + time * (0.4 + s[1]), r = (RING_R - 1) * (1 - f);
         pv.set(Math.cos(a) * r, RING_Y + Math.sin(a) * r, (s[1] - 0.5) * 1.6);
         sc = 0.1 + 0.25 * (1 - f);
       } else {
-        const f = (s[1] + time * (fire ? 0.25 + s[3] * 0.3 : 0.04 + s[3] * 0.05)) % 1;
-        pv.set((s[0] - 0.5) * 19 + Math.sin(time * 1.3 + i) * (fire ? 0.8 : 0.3), f * (fire ? 22 : 20), (s[2] - 0.5) * (fire ? 5 : 7));
+        const f = (s[1] + time * (fire ? 0.25 + s[3] * 0.3 : 0.04 + s[3] * 0.05)) % 1, a = s[0] * 6.283, r = Math.sqrt(s[2]) * (SHAFT_R + 2);
+        pv.set(Math.cos(a) * r + Math.sin(time * 1.3 + i) * (fire ? 0.8 : 0.3), f * (fire ? 26 : 22), Math.sin(a) * r);
         sc = fire ? (1.9 + s[3] * 1.6) * (1 - f) * Math.min(1, f * 8) : 0.16 + s[3] * 0.2;
+        if (this.unlockT >= 0) sc *= Math.max(0, 1 - this.unlockT);
       }
-      if (this.unlockT >= 0 && !this.open) sc = 0;
       m4.compose(pv, qv, sv.setScalar(sc));
       this.parts.setMatrixAt(i, m4);
     }
     this.parts.instanceMatrix.needsUpdate = true;
-
-    for (const o of this.orbs) {
-      if (!o.visible) continue;
-      const u = o.userData;
-      u.t += dt / 0.7;
-      if (u.t >= 1) { o.visible = false; continue; }
-      const e = u.t * u.t * (3 - 2 * u.t);
-      o.position.lerpVectors(u.from, pv.set(0, RING_Y, 0), e);
-      o.position.y += Math.sin(u.t * Math.PI) * 3;
-      o.scale.setScalar(1 - u.t * 0.5);
-    }
     return dist;
   }
 }

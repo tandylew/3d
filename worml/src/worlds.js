@@ -17,6 +17,26 @@ export const ELEMENTS = {
   magic: { label: 'Magic', css: '#c77dff', rgb: [0.75, 0.42, 1.0] },
 };
 export const ELEMENT_ORDER = ['water', 'fire', 'metal', 'wood', 'earth', 'magic'];
+// The overcoming cycle: BEATS[a] is the element that a overcomes.
+export const BEATS = { water: 'fire', fire: 'metal', metal: 'wood', wood: 'earth', earth: 'water' };
+export const WEAK_TO = { fire: 'water', metal: 'fire', wood: 'metal', earth: 'wood', water: 'earth' };
+
+// Each world's wormhole gate hangs in a hollow core, reached by a shaft that
+// opens at the wellhead on the surface once its seal is broken.
+export const SHAFT_R = 15, CORE_R = 300;
+
+// The four time relics, and the world whose anomaly holds each.
+export const WEAPONS = {
+  pearls: { name: 'Stillwater Pearls', form: 'pills', verb: 'Slow time', world: 'thalassa', css: '#9fe6ff', rgb: [0.6, 0.9, 1.0],
+    lore: 'Swallow one and the world crawls while you do not.', sign: 'Rain hangs in the air here, barely falling.' },
+  rewinder: { name: 'The Rewinder', form: 'gun', verb: 'Reverse time', world: 'pyra', css: '#ffb347', rgb: [1.0, 0.7, 0.28],
+    lore: 'Its shot sends a foe back the way it came, and un-falls fallen rock.', sign: 'Embers here fly backward, into the fire.' },
+  seeds: { name: 'Quickening Seeds', form: 'grenade', verb: 'Speed time', world: 'sylva', css: '#b6f07a', rgb: [0.7, 0.95, 0.45],
+    lore: 'Where one bursts, a century of growth happens in a breath.', sign: 'A tree here grows and withers, over and over.' },
+  mantle: { name: 'Mantle of the Held Moment', form: 'cape', verb: 'Freeze time', world: 'petra', css: '#e9d2ff', rgb: [0.9, 0.8, 1.0],
+    lore: 'Stop the world and leave an echo of yourself behind: be in two places at once.', sign: 'A dust storm here stands frozen in mid-air.' },
+};
+export const WEAPON_ORDER = ['pearls', 'rewinder', 'seeds', 'mantle'];
 
 // Quest order follows the classical overcoming cycle:
 // water douses fire, fire melts metal, metal cuts wood, wood breaks earth.
@@ -131,6 +151,17 @@ export function terrainRaw(def, x, y, z, mf = Infinity, useGate = true) {
     const dx = x - g.x, dy = y - g.y, dz = z - g.z;
     const d2 = (dx * dx + dy * dy + dz * dz) * def.radius * def.radius;
     if (d2 < g.r1 * g.r1) h = lerp(g.h, h, smoothstep(g.r0, g.r1, Math.sqrt(d2)));
+    // Essence deposits sit in ringed craters and time anomalies on lone
+    // mesas: landforms you can pick out from the air.
+    const sites = def.sites;
+    for (let i = 0; i < sites.length; i++) {
+      const s = sites[i], ex = x - s.x, ey = y - s.y, ez = z - s.z;
+      const e2 = (ex * ex + ey * ey + ez * ez) * def.radius * def.radius;
+      if (e2 >= s.r1 * s.r1) continue;
+      const d = Math.sqrt(e2);
+      h = lerp(s.h, h, smoothstep(s.r0, s.r1, d)) + s.rim * smoothstep(s.r0 * 0.9, s.r0 * 1.5, d) * (1 - smoothstep(s.r0 * 1.7, s.r1, d));
+      break;
+    }
   }
   return h;
 }
@@ -236,6 +267,21 @@ export function shade(def, x, y, z, raw, slope, out, mf = Infinity) {
   out.liq = 0; out.glow = 0; out.shine = 0;
   const k = def.radius / REF_RADIUS;
   SHADE[def.element](def.noise, x * k, y * k, z * k, raw, slope, out, mf / k);
+  // Around a deposit the ground is stained with the element and veined with light.
+  const sites = def.sites;
+  for (let i = 0; i < sites.length; i++) {
+    const s = sites[i], ex = x - s.x, ey = y - s.y, ez = z - s.z;
+    const e2 = (ex * ex + ey * ey + ez * ez) * def.radius * def.radius;
+    if (e2 >= s.r1 * s.r1 * 2.6) continue;
+    if (out.liq) break;
+    const d = Math.sqrt(e2), f = 1 - smoothstep(s.r0 * 0.4, s.r1 * 1.6, d);
+    const tint = s.kind === 'anomaly' ? [0.82, 0.78, 0.66] : def.glow;
+    const vein = 1 - smoothstep(0, 0.05, Math.abs(def.noise.fbm(x * k, y * k, z * k, 55, 2, mf / k)));
+    const t = f * (0.06 + 0.5 * vein) + (1 - smoothstep(0, s.r0 * 0.7, d)) * 0.12;
+    out.r += (tint[0] * 0.7 - out.r) * t * 0.5; out.g += (tint[1] * 0.7 - out.g) * t * 0.5; out.b += (tint[2] * 0.7 - out.b) * t * 0.5;
+    out.glow = Math.max(out.glow, f * f * vein * (s.kind === 'anomaly' ? 0.12 : 0.3));
+    break;
+  }
   return out;
 }
 
@@ -288,12 +334,70 @@ function chooseGateSite(def) {
   return { x: g.d[0], y: g.d[1], z: g.d[2], h: Math.max(g.h, def.liquid ? 30 : -1e9), r0: 62, r1: 175 };
 }
 
+// How rough the natural ground is around a direction (and whether it is dry).
+function siteScore(def, d) {
+  const h = terrainRaw(def, d[0], d[1], d[2], Infinity, false);
+  if (def.liquid && h < 25) return null;
+  let rough = 0;
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2, q = offsetDir(def, d, Math.cos(a) * 130, Math.sin(a) * 130);
+    const hq = terrainRaw(def, q[0], q[1], q[2], Infinity, false);
+    rough = Math.max(rough, Math.abs(hq - h));
+    if (def.liquid && hq < 4) rough += 300;
+  }
+  return { h, score: rough + Math.max(0, h - 400) * 0.2 };
+}
+
+const apart = (a, b) => Math.hypot(a[0] - b.x, a[1] - b.y, a[2] - b.z);
+
+// Deposits: one a short walk from the wellhead, the rest spread over the
+// whole globe (a jittered Fibonacci spiral, nudged onto dry, gentle ground).
+function chooseSites(def) {
+  const rnd = mulberry32(def.seed * 13 + 1), g = def.gate, gd = [g.x, g.y, g.z], sites = [];
+  const N = 8;
+  const find = (nominal, spread, tries, minGate) => {
+    let best = null;
+    for (let k = 0; k < tries; k++) {
+      const d = k === 0 ? nominal : offsetDir(def, nominal, (rnd() - 0.5) * 2 * spread, (rnd() - 0.5) * 2 * spread);
+      if (apart(d, g) * def.radius < minGate) continue;
+      if (sites.some((s) => apart(d, s) * def.radius < 900)) continue;
+      const sc = siteScore(def, d);
+      if (!sc) continue;
+      if (!best || sc.score < best.score) best = { d, h: sc.h, score: sc.score };
+      if (sc.score < 40) break;
+    }
+    return best;
+  };
+  const a0 = rnd() * Math.PI * 2;
+  for (let i = 0; i < N; i++) {
+    let b;
+    if (i === 0) b = find(offsetDir(def, gd, Math.cos(a0) * 480, Math.sin(a0) * 480), 260, 60, 330);
+    else {
+      const y = 1 - (2 * (i + 0.5)) / N, r = Math.sqrt(1 - y * y), th = i * 2.399963 + a0;
+      b = find([Math.cos(th) * r, y, Math.sin(th) * r], def.radius * 0.3, 90, 2500);
+    }
+    if (!b) continue;
+    sites.push({ kind: 'deposit', index: sites.length, x: b.d[0], y: b.d[1], z: b.d[2], h: b.h + 4, r0: 52, r1: 230, rim: 24,
+      buried: def.id !== 'thalassa' && sites.length % 3 === 2 });
+  }
+  const wid = Object.keys(WEAPONS).find((w) => WEAPONS[w].world === def.id);
+  if (wid) {
+    const a1 = a0 + 2.2;
+    const b = find(offsetDir(def, gd, Math.cos(a1) * 1250, Math.sin(a1) * 1250), 520, 80, 800);
+    if (b) sites.push({ kind: 'anomaly', weapon: wid, x: b.d[0], y: b.d[1], z: b.d[2], h: b.h + 30, r0: 34, r1: 150, rim: 0 });
+  }
+  return sites;
+}
+
 for (const def of PLANETS) {
   const a = (def.angle * Math.PI) / 180;
   def.pos = [Math.cos(a) * def.orbit, def.lift * def.orbit, Math.sin(a) * def.orbit];
   const l = Math.hypot(def.pos[0], def.pos[1], def.pos[2]);
   def.sunDir = [-def.pos[0] / l, -def.pos[1] / l, -def.pos[2] / l];
   def.noise = new Noise(def.seed);
-  def.gate = null;
+  def.gate = null; def.sites = [];
   def.gate = chooseGateSite(def);
+  def.sites = chooseSites(def);
+  def.deposits = def.sites.filter((q) => q.kind === 'deposit');
+  def.anomaly = def.sites.find((q) => q.kind === 'anomaly') || null;
 }

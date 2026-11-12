@@ -36,7 +36,7 @@ const state = () => page.evaluate(() => {
   const cam = renderer.xr.getCamera();
   return {
     presenting: renderer.xr.isPresenting, xr: input.xr, eyes: cam.cameras.length,
-    left: input.left.active, right: input.right.active, trigger: input.right.trigger, grip: input.left.grip,
+    left: input.left.active, right: input.right.active, trigger: input.right.trigger,
     alt: p.alt, speed: p.speed, water: g.state.inv.water, overlayHidden: document.getElementById('overlay').classList.contains('hidden'),
     wristOnLeft: g.hud.wrist.mesh.parent === input.ctrl.find((k) => k.handed === 'left')?.ray,
     yaw: Math.atan2(...(() => { const e = g.rig.matrixWorld.elements; return [e[8], e[10]]; })()),
@@ -73,16 +73,32 @@ s = await state();
 let dy = Math.abs(s.yaw - yaw0); if (dy > Math.PI) dy = 2 * Math.PI - dy;
 check('right stick snap-turns 30 degrees', Math.abs(dy - Math.PI / 6) < 0.12, `turned ${(dy * 180 / Math.PI).toFixed(1)} deg`);
 
-// Left grip gathers essence: stand among the orbs and squeeze.
-await page.evaluate(() => {
-  const g = window.worml.game, f = g.fields.get('thalassa'), o = f.orbs[0];
-  g.player.pos.copy(g.player.planet.pos).add(f.anchor).add(o.home).addScaledVector(o.up, -1.2);
-  window.xrDevice.controllers.left.updateButtonValue('squeeze', 1);
-});
-await wait(7000);
-s = await state();
-check('left grip draws in essence', s.grip > 0.9 && s.water >= 1, `water=${s.water}`);
+// Right grip casts essence; left grip uses the time relic; A leaps; Y shows objectives.
+const g2 = () => page.evaluate(() => { const g = window.worml.game; return { carried: Object.values(g.state.inv).reduce((a, b) => a + b, 0), slow: g.time.slowT, alt: g.player.alt, hud: g.hud.wrist.mesh.visible, bolts: g.combat.bolts.length }; });
+await page.evaluate(() => { const g = window.worml.game; g.grant(9); g.time.give('pearls'); });
+check('objectives panel hidden by default', !(await g2()).hud);
+const c0 = (await g2()).carried;
+await page.evaluate(() => window.xrDevice.controllers.right.updateButtonValue('squeeze', 1));
+await page.waitForFunction((n) => Object.values(window.worml.game.state.inv).reduce((a, b) => a + b, 0) < n, c0, { timeout: 30000 }).catch(() => {});
+await page.evaluate(() => window.xrDevice.controllers.right.updateButtonValue('squeeze', 0));
+let q = await g2();
+check('right grip casts essence', q.carried < c0, `carried ${c0} -> ${q.carried}`);
+await page.evaluate(() => window.xrDevice.controllers.left.updateButtonValue('squeeze', 1));
+await page.waitForFunction(() => window.worml.game.time.slowT > 0, null, { timeout: 30000 }).catch(() => {});
 await page.evaluate(() => window.xrDevice.controllers.left.updateButtonValue('squeeze', 0));
+check('left grip uses the time relic', (await g2()).slow > 0);
+await page.evaluate(() => window.xrDevice.controllers.left.updateButtonValue('y-button', 1));
+await page.waitForFunction(() => window.worml.game.hud.wrist.mesh.visible, null, { timeout: 30000 }).catch(() => {});
+await page.evaluate(() => window.xrDevice.controllers.left.updateButtonValue('y-button', 0));
+check('Y shows the objectives on the wrist', (await g2()).hud);
+const a0 = (await g2()).alt;
+await page.evaluate(() => window.xrDevice.controllers.right.updateButtonValue('a-button', 1));
+await wait(800);
+await page.evaluate(() => window.xrDevice.controllers.right.updateButtonValue('a-button', 0));
+await page.waitForFunction((a) => window.worml.game.player.alt > a + 150, a0, { timeout: 90000 }).catch(() => {});
+q = await g2();
+check('A makes a super leap', q.alt > a0 + 150, `alt ${a0.toFixed(0)} -> ${q.alt.toFixed(0)} m`);
+await page.screenshot({ path: 'shots/xr-leap.png' });
 
 let failed = 0;
 for (const r of log) { if (!r.ok) failed++; console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.detail ? '  (' + r.detail + ')' : ''}`); }

@@ -68,5 +68,6 @@ export class Audio {
   unlock() { [1, 1.25, 1.5, 2, 2.5, 3].forEach((m, i) => this.tone(220 * m, 1.6, 'sine', 0.2, i * 0.16)); this.sweep(3, 200, 3000, 0.35); }
   warp() { this.sweep(2.8, 150, 5000, 0.6); this.tone(70, 2.6, 'sawtooth', 0.12, 0, 6); }
   discover() { this.tone(392, 0.6, 'sine', 0.18); this.tone(587.3, 0.9, 'sine', 0.18, 0.18); }
+  relic() { [1, 1.5, 2.25, 3.375].forEach((m, i) => this.tone(261.6 * m, 1.4, 'sine', 0.16, i * 0.12)); this.sweep(1.6, 4000, 400, 0.2); }
   win() { [1, 1.25, 1.5, 2, 2.5, 3, 4].forEach((m, i) => this.tone(196 * m, 3, 'triangle', 0.18, i * 0.22)); }
 }

@@ -16,6 +16,7 @@ export const ENV = {
   uCloudMix: { value: new THREE.Vector4(1, 0, 0, 0) },
   uCloudP: { value: new THREE.Vector4(0.5, 0.1, 0, 2000) },
   uCloudCS: { value: new THREE.Vector2(1, 0) },
+  uSites: { value: Array.from({ length: 10 }, () => new THREE.Vector4(0, 1, 0, 0)) },
   uFog0: { value: 0 }, uR: { value: 1 }, uH: { value: 500 }, uCamAlt: { value: 0 },
   uCamSunElev: { value: 1 },
   uTime: { value: 0 },
@@ -24,6 +25,7 @@ export const ENV = {
 export function syncEnv(planet) {
   const u = planet.uniforms;
   ENV.uCloudMap.value = u.uCloudMap.value;
+  ENV.uSites.value = u.uSites.value;
   for (const k of ['uCenter', 'uSunDir', 'uScatter', 'uSunset', 'uCloudMix', 'uCloudP', 'uCloudCS']) ENV[k].value.copy(u[k].value);
   for (const k of ['uFog0', 'uR', 'uH', 'uCamAlt', 'uCamSunElev', 'uTime']) ENV[k].value = u[k].value;
 }

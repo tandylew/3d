@@ -35,8 +35,20 @@ uniform samplerCube uCloudMap;
 uniform vec4 uCloudMix;   // how this world blends the four baked noise fields
 uniform vec4 uCloudP;     // x threshold, y softness, z opacity, w layer altitude (m)
 uniform vec2 uCloudCS;    // slow rotation of the weather about the pole
+uniform vec4 uSites[10];  // xyz: direction of an essence deposit / anomaly, w: strength (0 = unused)
+uniform float uR;
 vec3 cloudRot(vec3 d) { return vec3(uCloudCS.x * d.x + uCloudCS.y * d.z, d.y, uCloudCS.x * d.z - uCloudCS.y * d.x); }
-float cloudBase(vec3 dir) { return dot(textureCube(uCloudMap, cloudRot(dir)), uCloudMix); }
+// The weather itself points at essence: the cloud deck opens in a clear eye
+// above every deposit, walled by a ring of piled-up cloud.
+float cloudEye(vec3 dir) {
+  float e = 0.0;
+  for (int i = 0; i < 10; i++) {
+    float d = distance(dir, uSites[i].xyz) * uR;
+    e += ((smoothstep(1000.0, 1500.0, d) * (1.0 - smoothstep(1700.0, 3000.0, d))) * 0.17 - (1.0 - smoothstep(450.0, 1200.0, d)) * 0.6) * uSites[i].w;
+  }
+  return e;
+}
+float cloudBase(vec3 dir) { return dot(textureCube(uCloudMap, cloudRot(dir)), uCloudMix) + cloudEye(dir); }
 // Fraction of direct sun reaching a point at height h (planet-relative P).
 float cloudShadow(vec3 P, vec3 up, float h) {
   float se = dot(up, uSunDir);
@@ -72,7 +84,8 @@ export const terrainFS = /* glsl */ `
 precision highp float;
 uniform sampler2D uDetail;
 uniform vec3 uCenter, uSunDir, uScatter, uSunset, uGlowColor, uRockCol, uRockP;
-uniform float uFog0, uSpace, uTime, uCamSunElev, uR, uH, uCamAlt, uStrata, uLiquid, uMetal;
+uniform float uFog0, uSpace, uTime, uCamSunElev, uH, uCamAlt, uStrata, uLiquid, uMetal;
+uniform vec4 uShaft;   // xyz: axis of the well shaft, w: its radius (0 while sealed)
 varying vec3 vColor;
 varying vec3 vAux;     // x: height above the liquid level / 40 m (clamped), y: glow, z: shine
 varying vec3 vDpos;
@@ -88,6 +101,9 @@ void main() {
   float rP = length(P);
   vec3 up = P / rP;
   float hgt = rP - uR;
+  // the mouth of the shaft down to the core
+  float along = dot(P, uShaft.xyz);
+  if (along > 0.0 && length(P - uShaft.xyz * along) < uShaft.w) discard;
   float shoreH = vAux.x * 40.0;
   float liq = uLiquid * step(shoreH, 0.0);
 
@@ -245,7 +261,7 @@ export const cloudFS = /* glsl */ `
 precision highp float;
 uniform sampler2D uDetail;
 uniform vec3 uCenter, uSunDir, uScatter, uSunset, uCloudTint;
-uniform float uTime, uCamSunElev, uR, uH, uCamAlt, uSpace, uFog0;
+uniform float uTime, uCamSunElev, uH, uCamAlt, uSpace, uFog0;
 varying vec3 vWorld;
 ${ATMO}
 ${CLOUD}
@@ -343,7 +359,7 @@ export const propFS = /* glsl */ `
 precision highp float;
 uniform sampler2D uDetail;
 uniform vec3 uCenter, uSunDir, uScatter, uSunset, uTint;
-uniform float uFog0, uCamSunElev, uShine, uFlash, uR, uH, uCamAlt, uGrain;
+uniform float uFog0, uCamSunElev, uShine, uFlash, uH, uCamAlt, uGrain;
 varying vec4 vColor;
 varying vec3 vNormal;
 varying vec3 vWorld;
@@ -443,10 +459,12 @@ void main() {
 export const portalFS = /* glsl */ `
 precision highp float;
 uniform sampler2D uDetail;
-uniform vec3 uColor, uColor2;
+uniform vec3 uColor, uColor2, uColor3;
 uniform float uTime, uOpen;
 varying vec2 vUv;
 void main() {
+  // each face shows where it leads: front = onward, back = the way back
+  vec3 uDest = gl_FrontFacing ? uColor2 : uColor3;
   vec2 p = vUv * 2.0 - 1.0;
   float r = length(p);
   float a = atan(p.y, p.x) / 6.2831853;
@@ -456,7 +474,7 @@ void main() {
   float swirl = smoothstep(0.25, 0.85, n1 * 0.6 + n2 * 0.6);
   float edge = smoothstep(1.0, 0.86, r);
   float core = smoothstep(0.55, 0.0, r);
-  vec3 col = mix(uColor * 0.25, uColor2, swirl) * (0.12 + swirl * 1.1) + mix(uColor2, vec3(1.0), 0.5) * core * core * 0.7;
+  vec3 col = mix(uColor * 0.25, uDest, swirl) * (0.12 + swirl * 1.1) + mix(uDest, vec3(1.0), 0.5) * core * core * 0.7;
   col += uColor * smoothstep(0.8, 0.98, r) * 1.2;
   float alpha = edge * uOpen;
   gl_FragColor = vec4(col * alpha, alpha * 0.92);
@@ -591,4 +609,70 @@ void main() {
   float star = step(0.985, h) * smoothstep(0.5, 0.0, length(fract(g) - 0.5)) * (0.3 + band);
   col += vec3(0.8, 0.85, 1.0) * star * 0.5;
   gl_FragColor = vec4(col + vec3(0.002, 0.003, 0.008), 1.0);
+}`;
+
+// ------------------------------------------------- shaft and hollow core
+// Emissive rock: cold crust near the surface, then strata lit from within,
+// then a geode of the world's own element around the gate.
+export const coreFS = /* glsl */ `
+precision highp float;
+uniform sampler2D uDetail;
+uniform vec3 uCenter, uGlowColor, uRockCol;
+uniform vec4 uShaft;
+uniform float uTime, uR, uCoreR, uChamber;
+varying vec3 vWorld;
+void main() {
+  vec3 P = vWorld - uCenter;
+  float r = length(P);
+  float along = dot(P, uShaft.xyz);
+  float perp = length(P - uShaft.xyz * along);
+  if (uChamber > 0.5 && along > 0.0 && perp < uShaft.w) discard;
+  vec3 n = P / r;
+  vec3 w = n * n;
+  float depth = clamp(1.0 - (r - uCoreR) / (uR - uCoreR), 0.0, 1.0);   // 0 at the surface, 1 at the core
+  // shaft walls map by (angle, depth); the chamber is triplanar on the sphere
+  vec3 q = mix(vec3(atan(P.z, P.x) * 15.0, r * 0.02, 0.0), P * 0.004, uChamber);
+  vec4 d1 = mix(texture2D(uDetail, q.xy), texture2D(uDetail, q.yz) * w.x + texture2D(uDetail, q.xz) * w.y + texture2D(uDetail, q.xy) * w.z, uChamber);
+  vec4 d2 = texture2D(uDetail, mix(q.xy * 5.0, (P.xy + P.zx) * 0.021, uChamber));
+  float facet = smoothstep(0.35, 0.65, d1.r) * 0.6 + d2.g * 0.4;
+  vec3 V = normalize(cameraPosition - vWorld);
+  float rimL = pow(1.0 - abs(dot(V, mix(normalize(P - uShaft.xyz * along), n, uChamber))), 2.0);
+  vec3 rock = uRockCol * (0.25 + 0.9 * facet);
+  // rings of light sinking toward the core, veins that brighten with depth
+  float ring = pow(0.5 + 0.5 * sin(r * 0.045 + uTime * 2.4), 12.0);
+  float vein = 1.0 - smoothstep(0.0, 0.03, abs(d1.r * 0.7 + d2.r * 0.4 - 0.55));
+  float heat = mix(0.05, 1.0, depth * depth);
+  vec3 col = rock * (0.12 + 0.5 * rimL) * (1.0 - 0.6 * depth);
+  col += uGlowColor * (vein * (0.15 + 0.9 * heat) * (1.0 - 0.45 * uChamber) + ring * (0.12 + 0.5 * heat) * (1.0 - uChamber));
+  // the geode: crystal facets catching the gate's light
+  float sparkle = pow(d2.g, 6.0) * (0.6 + 0.4 * sin(uTime * 1.3 + d1.r * 40.0));
+  col += uChamber * (uGlowColor * (0.015 + facet * facet * 0.09 + rimL * 0.12) + vec3(1.0) * sparkle * 0.9);
+  gl_FragColor = vec4(col, 1.0);
+  ${OUT}
+}`;
+
+// Full-view tint attached to the head: damage, time effects, fades.
+export const veilFS = /* glsl */ `
+precision highp float;
+uniform vec4 uTint;    // rgb + strength, vignette-shaped
+uniform vec4 uFade;    // rgb + alpha, uniform
+varying vec2 vUv;
+void main() {
+  float r = length(vUv * 2.0 - 1.0);
+  float v = smoothstep(0.25, 1.05, r) * uTint.a;
+  vec3 col = mix(uTint.rgb, uFade.rgb, uFade.a);
+  gl_FragColor = vec4(col, max(v, uFade.a));
+}`;
+
+// A soft light shaft (deposit pillars, god rays through the cloud eye).
+export const pillarFS = /* glsl */ `
+precision highp float;
+uniform vec3 uColor;
+uniform float uTime, uAlpha;
+varying vec2 vUv;
+void main() {
+  float fade = pow(1.0 - vUv.y, 1.6) * smoothstep(0.0, 0.02, vUv.y);
+  float drift = 0.75 + 0.25 * sin(vUv.y * 40.0 - uTime * 1.5 + vUv.x * 12.566);
+  gl_FragColor = vec4(uColor * fade * drift * uAlpha, 1.0);
+  ${OUT}
 }`;

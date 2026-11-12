@@ -31,7 +31,7 @@ export class Player {
     this.fall = 0; this.grounded = false; this.frozen = false;
     this.planet = planets[0]; this.alt = 0; this.speed = 0; this.vLimit = FLIGHT.V0;
     this.aimTarget = null; this.thrusting = false;
-    this.inside = false; this.ride = 0; this.jumpT = 0; this.leaping = false; this.eject = 0;
+    this.inside = false; this.ride = 0; this.jumpT = 0; this.leaping = false; this.eject = 0; this.arena = null;
   }
 
   // Bend the pointing direction toward a far world you're roughly aiming at,
@@ -115,7 +115,9 @@ export class Player {
     } else {
       ground = groundHeight(P.def, up.x, up.y, up.z);
       alt = dist - R - ground;
-      vLimit = Math.min(VMAX, V0 + RATE * Math.max(0, Math.min(alt, sunAlt)));
+      // the finale arena slows you as a surface would, so you arrive at it at a fighting pace
+      const arenaAlt = this.arena ? Math.max(0, this.pos.distanceTo(this.arena) - 140) : Infinity;
+      vLimit = Math.min(VMAX, V0 + RATE * Math.max(0, Math.min(alt, sunAlt, arenaAlt)));
     }
     this.vLimit = vLimit;
 

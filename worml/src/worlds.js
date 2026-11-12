@@ -7,6 +7,7 @@ export const SUN = { name: 'Lumen', radius: 150000 };
 // Terrain features are authored in metres at this reference radius, then kept
 // at the same physical size on worlds of any radius.
 const REF_RADIUS = 8000;
+const H_SCALE = 0.62;
 
 export const ELEMENTS = {
   water: { label: 'Water', css: '#4fc3ff', rgb: [0.25, 0.7, 1.0] },
@@ -36,58 +37,74 @@ export const WEAPONS = {
   mantle: { name: 'Mantle of the Held Moment', form: 'cape', verb: 'Freeze time', world: 'petra', css: '#e9d2ff', rgb: [0.9, 0.8, 1.0],
     lore: 'Stop the world and leave an echo of yourself behind: be in two places at once.', sign: 'A dust storm here stands frozen in mid-air.' },
 };
+// Passive relics: carried, not wielded.
+WEAPONS.mainspring = { name: 'Tempered Mainspring', form: 'coil', verb: 'Quicken your relics', world: 'ferrum', css: '#ffd27a', rgb: [1.0, 0.82, 0.48], passive: true,
+  lore: 'Wound into your other relics: they recharge twice as fast.', sign: 'Ore here orbits in jerks, like the teeth of a great clock.' };
+WEAPONS.prism = { name: 'Prism of Hours', form: 'prism', verb: 'Deepen your relics', world: 'arcana', css: '#b9f3ff', rgb: [0.72, 0.95, 1.0], passive: true,
+  lore: 'Every relic holds more: slow and freeze last longer, with a pearl and a seed to spare.', sign: 'Motes here circle in mirrored pairs, each the other\'s past.' };
 export const WEAPON_ORDER = ['pearls', 'rewinder', 'seeds', 'mantle'];
+export const PASSIVE_ORDER = ['mainspring', 'prism'];
+
+// Where each world's element is won: a pool (or pit) with a font at its heart.
+export const TRIALS = {
+  water: { name: 'The Tidepool', intro: 'Wraiths rise from the water', hazard: 'Geysers' },
+  fire: { name: 'The Crucible', intro: 'Fight in the fire: cinders climb out of the lava', hazard: 'Fire jets' },
+  metal: { name: 'The Foundry', intro: 'Sentinels assemble out of the quicksilver', hazard: 'Arcs' },
+  wood: { name: 'The Heartwood', intro: 'Thornlings sprout from the mire', hazard: 'Thorn bursts' },
+  earth: { name: 'The Quarry', intro: 'Golems break out of the ground', hazard: 'Rockfalls' },
+  magic: { name: 'The Rift', intro: 'Shades step out of the glow', hazard: 'Void flares' },
+};
 
 // Quest order follows the classical overcoming cycle:
 // water douses fire, fire melts metal, metal cuts wood, wood breaks earth.
 export const PLANETS = [
   {
     id: 'thalassa', name: 'Thalassa', title: 'World of Water', element: 'water',
-    radius: 30000, orbit: 1800000, angle: 40, lift: 0.03, seed: 1101, liquid: true, maxH: 1600,
+    radius: 15000, orbit: 1800000, angle: 40, lift: 0.03, seed: 1101, liquid: true, maxH: 1000,
     needs: null, lock: '',
-    atmo: { scatter: [0.16, 0.4, 1.0], sunset: [1.0, 0.5, 0.25], density: 2.4, height: 900 },
-    look: { rock: [0.31, 0.29, 0.27], rockP: [0.15, 0.3, 1], strata: 0.2, clouds: { mix: [0.55, 0, 0.33, 0.12], threshold: 0.5, soft: 0.13, opacity: 0.95, alt: 2300, tint: [1, 1, 1], drift: 0.0005 } },
+    atmo: { scatter: [0.16, 0.4, 1.0], sunset: [1.0, 0.5, 0.25], density: 2.4, height: 560 },
+    look: { rock: [0.31, 0.29, 0.27], rockP: [0.15, 0.3, 1], strata: 0.2, clouds: { mix: [0.55, 0, 0.33, 0.12], threshold: 0.5, soft: 0.13, opacity: 0.95, alt: 1700, tint: [1, 1, 1], drift: 0.0005 } },
     glow: [0.2, 0.9, 0.8],
   },
   {
     id: 'pyra', name: 'Pyra', title: 'World of Fire', element: 'fire',
-    radius: 24000, orbit: 600000, angle: 12, lift: -0.02, seed: 2207, liquid: true, maxH: 3000,
+    radius: 12000, orbit: 600000, angle: 12, lift: -0.02, seed: 2207, liquid: true, maxH: 1900,
     needs: { water: 5 }, lock: 'Wreathed in an undying firestorm. Water will douse it.',
-    atmo: { scatter: [0.5, 0.3, 0.2], sunset: [1.0, 0.6, 0.3], density: 1.7, height: 900 },
-    look: { rock: [0.15, 0.13, 0.125], rockP: [0.2, 0.42, 0.85], strata: 0.3, clouds: { mix: [0, 0.6, 0.3, 0.1], threshold: 0.5, soft: 0.2, opacity: 0.85, alt: 3900, tint: [0.34, 0.27, 0.24], drift: 0.0008 } },
+    atmo: { scatter: [0.5, 0.3, 0.2], sunset: [1.0, 0.6, 0.3], density: 1.7, height: 560 },
+    look: { rock: [0.15, 0.13, 0.125], rockP: [0.2, 0.42, 0.85], strata: 0.3, clouds: { mix: [0, 0.6, 0.3, 0.1], threshold: 0.5, soft: 0.2, opacity: 0.85, alt: 1700, tint: [0.34, 0.27, 0.24], drift: 0.0008 } },
     glow: [1.0, 0.33, 0.04],
   },
   {
     id: 'ferrum', name: 'Ferrum', title: 'World of Metal', element: 'metal',
-    radius: 28000, orbit: 1000000, angle: 64, lift: 0.05, seed: 3319, liquid: true, maxH: 1200,
+    radius: 14000, orbit: 1000000, angle: 64, lift: 0.05, seed: 3319, liquid: true, maxH: 800,
     needs: { fire: 5 }, lock: 'Sealed inside an iron shell. Fire will melt it.',
-    atmo: { scatter: [0.3, 0.4, 0.54], sunset: [0.95, 0.72, 0.5], density: 1.4, height: 900 },
+    atmo: { scatter: [0.3, 0.4, 0.54], sunset: [0.95, 0.72, 0.5], density: 1.4, height: 560 },
     look: { rock: [0.23, 0.24, 0.27], rockP: [0.1, 0.24, 1], strata: 0.3, metal: 0.45, clouds: { mix: [0.5, 0.3, 0, 0.2], threshold: 0.55, soft: 0.2, opacity: 0.6, alt: 2600, tint: [0.8, 0.82, 0.86], drift: 0.0004 } },
     glow: [0.15, 0.85, 1.0], rings: true,
   },
   {
     id: 'sylva', name: 'Sylva', title: 'World of Wood', element: 'wood',
-    radius: 32000, orbit: 2250000, angle: 86, lift: -0.04, seed: 4421, liquid: true, maxH: 1600,
+    radius: 16000, orbit: 2250000, angle: 86, lift: -0.04, seed: 4421, liquid: true, maxH: 1000,
     needs: { metal: 5 }, lock: 'Strangled by iron-thorn vines. Metal will cut them.',
-    atmo: { scatter: [0.2, 0.5, 0.95], sunset: [1.0, 0.55, 0.3], density: 2.4, height: 900 },
-    look: { rock: [0.3, 0.29, 0.26], rockP: [0.17, 0.32, 1], strata: 0.18, clouds: { mix: [0.1, 0.45, 0.33, 0.12], threshold: 0.48, soft: 0.14, opacity: 0.95, alt: 2500, tint: [1, 1, 1], drift: 0.0005 } },
+    atmo: { scatter: [0.2, 0.5, 0.95], sunset: [1.0, 0.55, 0.3], density: 2.4, height: 560 },
+    look: { rock: [0.3, 0.29, 0.26], rockP: [0.17, 0.32, 1], strata: 0.18, clouds: { mix: [0.1, 0.45, 0.33, 0.12], threshold: 0.48, soft: 0.14, opacity: 0.95, alt: 1800, tint: [1, 1, 1], drift: 0.0005 } },
     glow: [0.5, 1.0, 0.3],
   },
   {
     id: 'petra', name: 'Petra', title: 'World of Earth', element: 'earth',
-    radius: 34000, orbit: 1400000, angle: 112, lift: 0.02, seed: 5527, liquid: false, maxH: 3400,
+    radius: 17000, orbit: 1400000, angle: 112, lift: 0.02, seed: 5527, liquid: false, maxH: 2100,
     needs: { wood: 5 }, lock: 'Buried under living stone. Wood will root it apart.',
-    atmo: { scatter: [0.75, 0.5, 0.3], sunset: [1.0, 0.45, 0.2], density: 1.9, height: 900 },
-    look: { rock: [0.52, 0.31, 0.21], rockP: [0.1, 0.26, 1], strata: 0.3, clouds: { mix: [0.6, 0, 0.3, 0.1], threshold: 0.57, soft: 0.15, opacity: 0.75, alt: 4300, tint: [1, 0.94, 0.86], drift: 0.0004 } },
+    atmo: { scatter: [0.75, 0.5, 0.3], sunset: [1.0, 0.45, 0.2], density: 1.9, height: 560 },
+    look: { rock: [0.52, 0.31, 0.21], rockP: [0.1, 0.26, 1], strata: 0.3, clouds: { mix: [0.6, 0, 0.3, 0.1], threshold: 0.57, soft: 0.15, opacity: 0.75, alt: 2900, tint: [1, 0.94, 0.86], drift: 0.0004 } },
     glow: [1.0, 0.7, 0.3],
   },
   {
     id: 'arcana', name: 'Arcana', title: 'World of Magic', element: 'magic',
-    radius: 26000, orbit: 2800000, angle: 132, lift: 0.06, seed: 6631, liquid: true, maxH: 4500,
+    radius: 13000, orbit: 2800000, angle: 132, lift: 0.06, seed: 6631, liquid: true, maxH: 2800,
     needs: { water: 2, fire: 2, metal: 2, wood: 2, earth: 2 },
     lock: 'Bound by a void seal. It yields only to all five elements.',
-    atmo: { scatter: [0.4, 0.3, 0.8], sunset: [0.4, 0.85, 1.0], density: 2.2, height: 900 },
-    look: { rock: [0.24, 0.17, 0.36], rockP: [0.18, 0.36, 0.8], strata: 0.25, clouds: { mix: [0.3, 0.3, 0.3, 0.1], threshold: 0.52, soft: 0.18, opacity: 0.8, alt: 5300, tint: [0.85, 0.76, 1], drift: 0.0007 } },
+    atmo: { scatter: [0.4, 0.3, 0.8], sunset: [0.4, 0.85, 1.0], density: 2.2, height: 560 },
+    look: { rock: [0.24, 0.17, 0.36], rockP: [0.18, 0.36, 0.8], strata: 0.25, clouds: { mix: [0.3, 0.3, 0.3, 0.1], threshold: 0.52, soft: 0.18, opacity: 0.8, alt: 3500, tint: [0.85, 0.76, 1], drift: 0.0007 } },
     glow: [0.75, 0.3, 1.0],
   },
 ];
@@ -145,7 +162,8 @@ const RAW = {
 // below "sea level" on planets with a liquid).
 export function terrainRaw(def, x, y, z, mf = Infinity, useGate = true) {
   const n = def.noise, k = def.radius / REF_RADIUS, sx = x * k, sy = y * k, sz = z * k, m = mf / k;
-  let h = RAW[def.element](n, sx, sy, sz, m) + n.fbm(sx, sy, sz, 1300, 3, m) * 1.6;
+  // (relief is scaled down with the worlds so they still read as planets, not boulders)
+  let h = RAW[def.element](n, sx, sy, sz, m) * H_SCALE + n.fbm(sx, sy, sz, 1300, 3, m) * 1.6;
   const g = def.gate;
   if (useGate && g) {
     const dx = x - g.x, dy = y - g.y, dz = z - g.z;
@@ -160,6 +178,7 @@ export function terrainRaw(def, x, y, z, mf = Infinity, useGate = true) {
       if (e2 >= s.r1 * s.r1) continue;
       const d = Math.sqrt(e2);
       h = lerp(s.h, h, smoothstep(s.r0, s.r1, d)) + s.rim * smoothstep(s.r0 * 0.9, s.r0 * 1.5, d) * (1 - smoothstep(s.r0 * 1.7, s.r1, d));
+      if (s.isle) h += (s.isle - s.h) * (1 - smoothstep(5, 13, d));      // the font's islet in the middle of the pool
       break;
     }
   }
@@ -337,55 +356,45 @@ function chooseGateSite(def) {
 // How rough the natural ground is around a direction (and whether it is dry).
 function siteScore(def, d) {
   const h = terrainRaw(def, d[0], d[1], d[2], Infinity, false);
-  if (def.liquid && h < 25) return null;
+  if (def.liquid && h < 12) return null;
   let rough = 0;
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2, q = offsetDir(def, d, Math.cos(a) * 130, Math.sin(a) * 130);
     const hq = terrainRaw(def, q[0], q[1], q[2], Infinity, false);
     rough = Math.max(rough, Math.abs(hq - h));
-    if (def.liquid && hq < 4) rough += 300;
+    if (def.liquid && hq < 2) rough += 300;
   }
-  return { h, score: rough + Math.max(0, h - 400) * 0.2 };
+  return { h, score: rough + Math.max(0, h - 60) * 0.6 };
 }
 
 const apart = (a, b) => Math.hypot(a[0] - b.x, a[1] - b.y, a[2] - b.z);
 
-// Deposits: one a short walk from the wellhead, the rest spread over the
-// whole globe (a jittered Fibonacci spiral, nudged onto dry, gentle ground).
+// Each world has three places: the wellhead, the element's trial ground and a
+// time anomaly, all within a short flight of one another.
 function chooseSites(def) {
   const rnd = mulberry32(def.seed * 13 + 1), g = def.gate, gd = [g.x, g.y, g.z], sites = [];
-  const N = 8;
   const find = (nominal, spread, tries, minGate) => {
     let best = null;
     for (let k = 0; k < tries; k++) {
       const d = k === 0 ? nominal : offsetDir(def, nominal, (rnd() - 0.5) * 2 * spread, (rnd() - 0.5) * 2 * spread);
       if (apart(d, g) * def.radius < minGate) continue;
-      if (sites.some((s) => apart(d, s) * def.radius < 900)) continue;
+      if (sites.some((s) => apart(d, s) * def.radius < 600)) continue;
       const sc = siteScore(def, d);
       if (!sc) continue;
       if (!best || sc.score < best.score) best = { d, h: sc.h, score: sc.score };
-      if (sc.score < 40) break;
+      if (sc.score < 25) break;
     }
     return best;
   };
   const a0 = rnd() * Math.PI * 2;
-  for (let i = 0; i < N; i++) {
-    let b;
-    if (i === 0) b = find(offsetDir(def, gd, Math.cos(a0) * 480, Math.sin(a0) * 480), 260, 60, 330);
-    else {
-      const y = 1 - (2 * (i + 0.5)) / N, r = Math.sqrt(1 - y * y), th = i * 2.399963 + a0;
-      b = find([Math.cos(th) * r, y, Math.sin(th) * r], def.radius * 0.3, 90, 2500);
-    }
-    if (!b) continue;
-    sites.push({ kind: 'deposit', index: sites.length, x: b.d[0], y: b.d[1], z: b.d[2], h: b.h + 4, r0: 52, r1: 230, rim: 24,
-      buried: def.id !== 'thalassa' && sites.length % 3 === 2 });
-  }
+  let b = find(offsetDir(def, gd, Math.cos(a0) * 620, Math.sin(a0) * 620), 320, 140, 420);
+  // The trial ground: a ringed basin sunk to the world's liquid (a pool of water,
+  // lava, quicksilver...) with the font on an islet; on dry Petra, a quarry pit.
+  if (b) sites.push({ kind: 'deposit', index: 0, x: b.d[0], y: b.d[1], z: b.d[2], h: def.liquid ? -3 : b.h - 9, isle: def.liquid ? 2.2 : b.h - 6.5, r0: 46, r1: def.liquid ? Math.max(150, 46 + (b.h + 3) * 2.2) : 170, rim: 9 });
   const wid = Object.keys(WEAPONS).find((w) => WEAPONS[w].world === def.id);
-  if (wid) {
-    const a1 = a0 + 2.2;
-    const b = find(offsetDir(def, gd, Math.cos(a1) * 1250, Math.sin(a1) * 1250), 520, 80, 800);
-    if (b) sites.push({ kind: 'anomaly', weapon: wid, x: b.d[0], y: b.d[1], z: b.d[2], h: b.h + 30, r0: 34, r1: 150, rim: 0 });
-  }
+  const a1 = a0 + 2.3;
+  b = find(offsetDir(def, gd, Math.cos(a1) * 900, Math.sin(a1) * 900), 420, 120, 600);
+  if (b && wid) sites.push({ kind: 'anomaly', weapon: wid, x: b.d[0], y: b.d[1], z: b.d[2], h: b.h + 30, r0: 34, r1: 150, rim: 0 });
   return sites;
 }
 

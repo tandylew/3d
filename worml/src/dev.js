@@ -2,28 +2,30 @@
 // judging, quest shortcuts, look/flight tuning and self-playing demos that
 // show each control in action. Opened with the DEV button, the ` key or ?dev.
 import * as THREE from 'three';
-import { PLANETS, ELEMENTS, SUN, WEAPONS, WEAPON_ORDER, WEAK_TO, terrainRaw } from './worlds.js';
+import { PLANETS, ELEMENTS, SUN, WEAPONS, WEAPON_ORDER, WEAK_TO, TRIALS, terrainRaw, groundHeight } from './worlds.js';
 import { CAST } from './game.js';
+import { ARENA } from './trials.js';
 import { FLIGHT } from './player.js';
 import { fmtDist, fmtSpeed } from './hud.js';
 import { mulberry32 } from './noise.js';
 
 const PLACES = [
-  ['gate', 'Wellhead'], ['core', 'Core gate'], ['deposit', 'Essence deposit'], ['anomaly', 'Time anomaly'], ['shore', 'Shore'], ['peak', 'Summit'],
+  ['gate', 'Wellhead'], ['core', 'Core gate'], ['deposit', 'Element trial'], ['anomaly', 'Time anomaly'], ['shore', 'Shore'], ['peak', 'Summit'],
   ['sunset', 'Sunset'], ['night', 'Night side'], ['clouds', 'Above clouds'], ['orbit', 'Low orbit'], ['far', 'Far view'],
 ];
 const CTRL = {
-  fly: { vr: 'Point a hand + Trigger', key: 'F for flight, then W', touch: 'FLY on, then left stick', hl: ['fly', 'stick'] },
+  fly: { vr: 'Point a hand + Trigger', key: 'W (after a leap)', touch: 'Left stick (after a leap)', hl: ['stick'] },
   brake: { vr: 'Release Trigger', key: 'Release W', touch: 'Release the stick', hl: [] },
   move: { vr: 'Left stick', key: 'W A S D', touch: 'Left stick (right stick looks)', hl: ['stick', 'look'] },
-  jump: { vr: 'A or X', key: 'Space', touch: 'LEAP', hl: ['jump'] },
-  land: { vr: 'Release below 500 m', key: 'F for flight off', touch: 'FLY off', hl: ['fly'] },
-  cast: { vr: 'Hold right grip, release on the flash', key: 'Hold left click, release on the flash', touch: 'Hold CAST, release on the flash', hl: ['cast'] },
+  jump: { vr: 'A or X', key: 'Space', touch: 'Double-tap the look side', hl: ['jump'] },
+  land: { vr: 'Release below 500 m', key: 'Fly down to the ground', touch: 'Fly down to the ground', hl: [] },
+  cast: { vr: 'Hold right grip, release on the flash', key: 'Hold left click, release on the flash', touch: 'Tap, or press and release on the flash', hl: ['cast'] },
+  slash: { vr: 'Swing a controller', key: 'V', touch: 'Swipe across the open screen', hl: ['slash'] },
   time: { vr: 'Left grip (B switches relic)', key: 'E (Q switches relic)', touch: 'TIME (⟳ switches relic)', hl: ['time'] },
   none: null,
 };
 const DEMOS = [
-  ['flight', 'Take off, cruise, land'], ['walk', 'Walk, strafe, super leap'], ['gather', 'Gather essence'], ['fight', 'Fight guardians'],
+  ['flight', 'Take off, cruise, land'], ['walk', 'Walk, strafe, super leap'], ['gather', 'Win an element trial'], ['fight', 'Blade and cast'],
   ['relics', 'The four time relics'], ['unseal', 'Break a seal'], ['transit', 'Core, gate, and back up'], ['travel', 'Fly to another world'],
 ];
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), q1 = new THREE.Quaternion();
@@ -58,7 +60,7 @@ export class Dev {
       <details open><summary>Warp</summary>
         <div class="chips">${chips}</div>
         <div class="grid">${places}</div>
-        <div class="grid"><button data-place="sun">The sun</button><button data-place="system">System overview</button><button data-place="midway">Deep space</button></div>
+        <div class="grid"><button data-place="arena">Sun arena</button><button data-place="sun">The sun</button><button data-place="system">System overview</button><button data-place="midway">Deep space</button></div>
         <p class="note" id="dv-vrnote">Warp first, then <button id="dv-vr" class="link">enter VR from here</button> to judge a spot in the headset.</p>
       </details>
       <details open><summary>Control demos</summary>
@@ -81,6 +83,8 @@ export class Dev {
           <button data-quest="give">Fill essence</button><button data-quest="empty">Empty essence</button>
           <button data-quest="relics">Give all relics</button><button data-quest="foes">Summon guardians</button>
           <button data-quest="heal">Heal</button><button data-quest="hurt">Take 40 damage</button>
+          <button data-quest="master">Master all trials</button><button data-quest="finale">Go to the finale</button>
+          <button data-quest="boss">Skip to the Heliarch</button>
           <button data-quest="reset">Reset progress</button>
         </div>
       </details>
@@ -278,6 +282,7 @@ export class Dev {
         free(planet.pos.clone().addScaledVector(d, R * 4.6), planet.pos, new THREE.Vector3(0, 1, 0));
         break;
       }
+      case 'arena': { const side = new THREE.Vector3(1, 0, 0).cross(g.trials.up).normalize(); free(ARENA.clone().addScaledVector(g.trials.up, 150).addScaledVector(side, 190), ARENA, side.clone().cross(g.trials.up)); break; }
       case 'sun': { const d = PLANETS[0].pos; v2.set(d[0], d[1], d[2]).normalize(); free(v2.clone().multiplyScalar(SUN.radius * 4.5), new THREE.Vector3(), new THREE.Vector3(0, 1, 0)); break; }
       case 'system': free(new THREE.Vector3(0.3e6, 4.4e6, 0.9e6), new THREE.Vector3(), new THREE.Vector3(0, 0, -1)); break;
       case 'midway': {
@@ -288,7 +293,7 @@ export class Dev {
       }
     }
     pl.grounded = false;
-    input.flyMode = kind === 'clouds' || kind === 'orbit';      // arrive hovering when the place is in the air
+    input.flyMode = kind === 'clouds' || kind === 'orbit' || kind === 'arena';      // arrive hovering when the place is in the air
     g.combat.dropPursuit();
   }
 
@@ -300,9 +305,17 @@ export class Dev {
     else if (k === 'give') g.grant(9);
     else if (k === 'empty') g.grant(0);
     else if (k === 'reset') { g.reset(); this.warp('thalassa', 'gate'); }
-    else if (k === 'relics') { for (const w of ['pearls', 'rewinder', 'seeds', 'mantle']) g.time.give(w); }
+    else if (k === 'relics') { for (const w of Object.keys(WEAPONS)) g.time.give(w); }
     else if (k === 'foes') this.summon(3);
     else if (k === 'heal') g.health = 100;
+    else if (k === 'master') { for (const p of PLANETS) g.state.trial[p.id] = true; g.grant(12); g.save(); }
+    else if (k === 'finale' || k === 'boss') {
+      while (g.unlockNext());
+      for (const p of PLANETS) g.state.trial[p.id] = true;
+      g.state.finale = false; g.grant(12); g.health = 100; g.trials.reset();
+      this.warp('thalassa', 'arena');
+      if (k === 'boss') { g.trials.f.phase = 'rest'; g.trials.f.wave = 1; g.trials.f.restT = 1; }
+    }
     else if (k === 'hurt') g.hurt(40);
   }
 
@@ -339,20 +352,19 @@ export class Dev {
     const g = this.game;
     if (k === 'recharge') g.time.recharge();
     else if (k === 'foes') { this.summon(3); }
-    else if (k === 'calm') g.combat.dropPursuit();
+    else if (k === 'calm') { g.combat.clear((e) => e.tag === 'dev'); g.combat.dropPursuit(); }
   }
 
-  // Bring the nearest idle guardians of this world to the player, angry.
-  summon(n) {
-    const g = this.game, c = g.combat, up = g.player.up;
-    const list = c.enemies.filter((e) => e.state === 'idle' && !e.foreign).sort((a, b) => a.pos.distanceTo(g.headSolar) - b.pos.distanceTo(g.headSolar)).slice(0, n);
-    const t = new THREE.Vector3().crossVectors(up, new THREE.Vector3(0.3, 0.9, 0.1)).normalize(), b = new THREE.Vector3().crossVectors(up, t);
-    list.forEach((e, i) => {
-      const a = (i / n) * Math.PI * 2;
-      e.pos.copy(g.headSolar).addScaledVector(t, Math.cos(a) * 32).addScaledVector(b, Math.sin(a) * 32).addScaledVector(up, 5);
-      e.state = 'chase'; e.act = 'run'; e.air = false; e.pacify = 0; e.hp = e.max; e.hist.length = 0; for (const l of e.legs) l.set = false;
-    });
-    return list;
+  // Raise n guardians of this world's element out of the ground around the player.
+  summon(n, el = null) {
+    const g = this.game, c = g.combat, pl = g.player, P = pl.planet, up = pl.up, space = pl.alt > 5000;
+    const t = new THREE.Vector3().crossVectors(up, new THREE.Vector3(0.3, 0.9, 0.1)).normalize(), b = new THREE.Vector3().crossVectors(up, t), out = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + 0.4, pos = g.headSolar.clone().addScaledVector(t, Math.cos(a) * 26).addScaledVector(b, Math.sin(a) * 26);
+      if (!space) { const d = pos.clone().sub(P.pos).normalize(); pos.copy(P.pos).addScaledVector(d, P.def.radius + groundHeight(P.def, d.x, d.y, d.z)); }
+      out.push(c.spawn({ planet: P, pos, el: el || P.def.element, emerge: true, tag: 'dev', space, striker: i % 2 === 0 }));
+    }
+    return out;
   }
 
   // --------------------------------------------------------------- demos
@@ -431,7 +443,7 @@ export class Dev {
 
   *demo_flight() {
     const g = this.game, p = g.player, d = this.dbg, gate = g.gates.get(p.planet.def.id), planet = p.planet;
-    this.cap('Take off', 'Turn flight on, then push forward: you fly where you look', 'fly');
+    this.cap('Take off', 'A leap puts you in the air; from there, forward flies where you look', 'fly');
     const fwd = new THREE.Vector3();
     for (let t = 0; t < 14 && p.alt < 1500; t += this.dt) {
       g.camera.getWorldDirection(fwd); fwd.addScaledVector(p.up, -fwd.dot(p.up)).normalize();
@@ -443,7 +455,7 @@ export class Dev {
     d.trigger = 0; yield* this.wait(3);
     this.cap('Descend', 'Aim at the ground. The limit shrinks as you approach, so arrival is always gentle', 'fly');
     yield* this.flyTo(planet, gate.frontDir(44).multiplyScalar(gate.site.length() + 3), 14, 40);
-    this.cap('Touch down', 'Turn flight off and you settle on your feet', 'land');
+    this.cap('Touch down', 'Within a few metres of the ground, flight ends and you settle on your feet', 'land');
     d.fly = false; yield* this.wait(4);
     this.stopDemo();
   }
@@ -458,7 +470,7 @@ export class Dev {
     this.cap('Super leap', 'A giant jump into the sky, leaning the way you look', 'jump');
     d.jump = true; yield;
     for (let t = 0; t < 8 && (p.leaping || t < 1); t += this.dt) { this.cap('Super leap', `${fmtDist(Math.max(0, p.alt))} up and climbing. Leap again in the air to go higher still.`, 'jump'); yield; }
-    this.cap('Hover, then come down', 'You arrive with flight on. Switch it off to sink back: the fall eases as the ground nears.', 'land');
+    this.cap('Hover, then come down', 'A leap leaves you flying. Fly down to the ground and you land by yourself.', 'land');
     yield* this.wait(2.5);
     d.fly = false;
     for (let t = 0; t < 40 && !p.grounded; t += this.dt) yield;
@@ -466,37 +478,55 @@ export class Dev {
     this.stopDemo();
   }
 
+  // Strike the nearest guardian: blades while it is close, perfect casts otherwise.
+  *strike() {
+    const g = this.game, e = this.nearestFoe(); if (!e) { yield; return; }
+    const d = e.pos.distanceTo(g.headSolar);
+    this.aimAt(e.head);
+    if (d < 13 || !g.castEl) {
+      const dir = v2.copy(e.head).sub(g.headSolar).normalize().clone();
+      this.dbg.slash = { pos: this.input.right.pos.clone(), dir, sweep: new THREE.Vector3().crossVectors(dir, g.player.up).normalize(), power: 0.9 };
+      yield* this.wait(0.3);
+    } else yield* this.charged(() => { const q = this.nearestFoe(); if (q) this.aimAt(q.head); });
+  }
+
   *demo_gather() {
-    const g = this.game, p = g.player, def = p.planet.def, field = g.fields.get(def.id), el = ELEMENTS[def.element];
-    if (g.state.inv[def.element] > 6) g.state.inv[def.element] = 6;
-    const near = field.nearest(p.pos.clone().sub(p.planet.pos)), dep = near.dist < 3000 && !near.dep.buried ? near.dep : field.deposits[0];
-    this.cap(`Find ${el.label} essence`, 'A deposit: a ringed crater under a pillar of light, where the clouds have parted', 'fly');
-    yield* this.flyTo(p.planet, dep.pos.clone().addScaledVector(dep.up, 30), 45, 60);
-    for (let n = 0; n < 4; n++) {
-      const here = p.pos.clone().sub(p.planet.pos);
-      const o = dep.orbs.filter((q) => q.state === 0).map((q) => q.pos.clone().applyMatrix4(dep.g.matrix)).sort((a, b) => a.distanceTo(here) - b.distanceTo(here))[0];
-      if (!o) break;
-      this.cap(`Gather ${el.label} essence`, 'No button: move into the orbs and they fly to you', 'fly');
-      yield* this.flyTo(p.planet, o, 4, 20);
-      yield* this.wait(0.8);
-      this.cap(`${g.state.inv[def.element]} ${el.label} essence`, 'It is now your power: every cast spends one', 'none');
+    const g = this.game, p = g.player, def = p.planet.def, field = g.fields.get(def.id), el = ELEMENTS[def.element], T = TRIALS[def.element], site = field.site;
+    if (g.state.trial[def.id]) { g.state.trial[def.id] = false; g.trials.reset(); }
+    this.cap(`To ${T.name}`, `Follow the stream from the well. ${el.label} is won there, not picked up.`, 'fly');
+    this.dbg.jump = true; yield* this.wait(2.5);
+    yield* this.flyTo(p.planet, site.pos.clone().addScaledVector(site.up, 6).addScaledVector(site.t1, 24), 5, 60);
+    this.dbg.fly = false;
+    for (let t = 0; t < 150 && !g.state.trial[def.id]; t += this.dt) {
+      const e = this.nearestFoe();
+      this.cap(T.name, `${T.intro}. ${T.hazard} burst where a ring closes: keep moving. Wave ${Math.max(1, g.trials.wave + 1)} · health ${Math.round(g.health)}`, e && e.pos.distanceTo(g.headSolar) < 13 ? 'slash' : 'cast');
+      this.dbg.move.set(Math.sin(t * 0.8) * 0.9, 0.25);          // keep circling so the eruptions miss
+      if (e) yield* this.strike(); else yield;
+      if (g.health < 45) g.health = 100;
     }
-    yield* this.wait(2.5);
+    this.dbg.move.set(0, 0);
+    this.cap(`${el.label} mastered`, 'The font is awake. Stand by it whenever you need a refill.', 'none');
+    yield* this.wait(5);
     this.stopDemo();
   }
 
   *demo_fight() {
     const g = this.game, d = this.dbg;
-    g.grant(9); g.health = 100;
-    const foes = this.summon(3);
-    if (!foes.length) { this.cap('No guardians near', 'Warp to an essence deposit first'); yield* this.wait(3); this.stopDemo(); return; }
-    this.cap('Guardians', 'They gather at deposits and attack when you come close. The demo has filled your essence.', 'none');
+    g.grant(9); g.health = 100; d.fly = false;
+    this.summon(3);
+    this.cap('Guardians rise', 'Out of the ground, the pool, the fire. The demo has filled your essence.', 'none');
     yield* this.wait(2.5);
-    this.cap('Quick casts', 'A tap throws a weak bolt at once. Guardians on the ground may sidestep a slow one.', 'cast');
-    for (let n = 0; n < 3 && this.nearestFoe(); n++) { yield* this.charged(() => { const e = this.nearestFoe(); if (e) this.aimAt(e.head); }, 0.06); yield* this.wait(0.25); }
+    for (let n = 0; n < 6 && this.nearestFoe(); n++) {
+      const e = this.nearestFoe(), dir = v2.copy(e.head).sub(g.headSolar).normalize().clone();
+      this.aimAt(e.head);
+      this.cap('Blade', 'A swing or a swipe throws a blade of your element. It is free, short-ranged, and cuts everything it crosses. Through the head it hits far harder.', 'slash');
+      d.slash = { pos: this.input.right.pos.clone(), dir, sweep: new THREE.Vector3().crossVectors(dir, g.player.up).normalize(), power: 0.9 };
+      yield* this.wait(0.45);
+    }
+    for (let n = 0; n < 3 && this.nearestFoe(); n++) { this.cap('Quick cast', 'A tap throws a weak bolt at once. Each cast spends one essence.', 'cast'); yield* this.charged(() => { const e = this.nearestFoe(); if (e) this.aimAt(e.head); }, 0.06); yield* this.wait(0.25); }
     for (let n = 0; n < 14 && this.nearestFoe(); n++) {
       const el = g.castEl;
-      this.cap('Perfect casts', `Hold to charge and release on the white flash: three times the force, twice the speed. Aim for the head. ${el ? ELEMENTS[el].label : ''} · health ${Math.round(g.health)}${g.lastHit ? ` · last hit ${g.lastHit.dmg}` : ''}`, 'cast');
+      this.cap('Perfect cast', `Hold to charge and release on the white flash: three times the force, twice the speed. ${el ? ELEMENTS[el].label : ''} · health ${Math.round(g.health)}${g.lastHit ? ` · last hit ${g.lastHit.dmg}` : ''}`, 'cast');
       yield* this.charged(() => { const e = this.nearestFoe(); if (e) this.aimAt(e.head); });
       yield* this.wait(0.15);
     }
@@ -509,6 +539,7 @@ export class Dev {
   *demo_relics() {
     const g = this.game, p = g.player, d = this.dbg, tw = g.time;
     for (const w of ['pearls', 'rewinder', 'seeds', 'mantle']) g.state.weapons[w] = true;
+    d.fly = false;
     g.grant(9); g.health = 100; tw.pearls.n = 3; tw.seeds.n = 2; tw.cool.rewinder = tw.cool.mantle = 0;
     this.summon(4);
     this.cap('Four relics, four ways to bend time', 'Each is found at an anomaly on its own world. The demo has lent you all four.', 'none');
@@ -616,6 +647,7 @@ export class Dev {
       + row('Frame', `${(1000 / (this.fps || 1)).toFixed(1)} ms avg · ${(worst * 1000).toFixed(0)} ms worst`)
       + row('Draw calls / tris', `${info.calls} / ${(info.triangles / 1000).toFixed(0)}k`)
       + row('Health', `${Math.round(g.health)}${g.dead ? ' · dead' : ''}`) + row('Guardians', `${g.combat.enemies.length} posted · ${g.combat.hunting} hunting · ${g.combat.pursuing} pursuing`)
+      + row('Trial', g.trials.active ? `wave ${g.trials.wave + 1} · ${g.trials.phase}` : g.state.trial[def.id] ? 'mastered' : 'not started') + row('Finale', `${g.trials.f.phase}${g.trials.f.boss ? ` · Heliarch ${Math.round(g.trials.f.boss.hp)} hp as ${g.trials.f.boss.el}` : ''} · played ${Math.floor(s.playTime / 60)}:${String(Math.floor(s.playTime % 60)).padStart(2, '0')}`)
       + row('Time', g.time.freezeT > 0 ? 'frozen' : g.time.slowT > 0 ? `slowed to ${g.time.worldScale * 100}% · ${g.time.slowT.toFixed(1)} s left` : 'normal') + row('Relics', g.time.list().join(', ') || 'none')
       + row('Terrain queue', g.manager.pending || 0) + row('Scenery', g.props.count)
       + row('Render', `${this.renderer.domElement.width}×${this.renderer.domElement.height} (${Math.round(this.quality.scale * 100)}%)`);

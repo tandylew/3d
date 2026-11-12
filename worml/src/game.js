@@ -1,7 +1,7 @@
 // Game orchestration: world streaming, the elemental quest, health and
 // combat, time relics, wormhole transits, HUD state and persistence.
 import * as THREE from 'three';
-import { PLANETS, PLANET_BY_ID, ELEMENTS, ELEMENT_ORDER, WEAK_TO, WEAPONS } from './worlds.js';
+import { PLANETS, PLANET_BY_ID, ELEMENTS, ELEMENT_ORDER, WEAK_TO, WEAPONS, TRIALS } from './worlds.js';
 import { smoothstep } from './noise.js';
 import { makeDetailTexture, syncEnv, glowMaterial } from './gfx.js';
 import { Planet, TerrainManager } from './planet.js';
@@ -14,8 +14,9 @@ import { Hud } from './hud.js';
 import { Streaks, Tunnel } from './fx.js';
 import { Combat } from './combat.js';
 import { Timeworks } from './timeworks.js';
+import { Trials, ARENA } from './trials.js';
 
-export const SAVE_KEY = 'worml-save-v2';
+export const SAVE_KEY = 'worml-save-v3';
 const QUEST = ['thalassa', 'pyra', 'ferrum', 'sylva', 'petra', 'arcana'];
 const SOURCE = { water: 'thalassa', fire: 'pyra', metal: 'ferrum', wood: 'sylva', earth: 'petra', magic: 'arcana' };
 const CAP = 12;
@@ -30,7 +31,7 @@ function freshState() {
     open: { thalassa: true }, order: ['thalassa'], visited: {}, won: false,
     inv: Object.fromEntries(ELEMENT_ORDER.map((e) => [e, 0])),
     charge: Object.fromEntries(PLANETS.map((p) => [p.id, {}])),
-    weapons: {}, sel: null,
+    weapons: {}, sel: null, trial: {}, finale: false, playTime: 0,
     unburied: Object.fromEntries(PLANETS.map((p) => [p.id, {}])),
   };
 }
@@ -54,6 +55,8 @@ export class Game {
     this.tunnel = new Tunnel(rig, this.detail);
     this.combat = new Combat(this, scene);
     this.time = new Timeworks(this, scene);
+    this.trials = new Trials(this, scene);
+    this.cap = CAP; this.slashCool = 0; this.prevAlt = 0;
     this.transit = null; this.pendingUnlock = null; this.saveT = 0;
     this.started = false; this.clock = 0; this.worldTime = 0;
     this.health = 100; this.hurtT = 99; this.hurtFlash = 0; this.dead = null;
@@ -67,7 +70,7 @@ export class Game {
     this.state = freshState();
     try {
       const raw = localStorage.getItem(SAVE_KEY);
-      if (raw) { const s = JSON.parse(raw), f = freshState(); Object.assign(this.state, s); for (const k of ['weapons', 'unburied', 'charge', 'inv']) this.state[k] = { ...f[k], ...(s[k] || {}) }; }
+      if (raw) { const s = JSON.parse(raw), f = freshState(); Object.assign(this.state, s); for (const k of ['weapons', 'unburied', 'charge', 'inv', 'trial']) this.state[k] = { ...f[k], ...(s[k] || {}) }; }
     } catch { /* no storage: play without saving */ }
     this.applyState();
 
@@ -77,7 +80,7 @@ export class Game {
 
   applyState() {
     for (const [id, g] of this.gates) g.setOpen(!!this.state.open[id], true);
-    for (const [id, f] of this.fields) for (const d of f.deposits) if (d.site.buried) f.setBuried(d.index, !this.state.unburied[id]?.[d.index]);
+    this.player.arena = this.state.won ? ARENA : null;
     this.updateDests();
     this.pendingUnlock = null;
   }
@@ -87,7 +90,8 @@ export class Game {
     try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
     this.applyState();
     this.health = 100; this.told = {};
-    this.combat.dropPursuit(); this.combat.setPlanet(null);
+    this.trials.reset();
+    this.combat.dropPursuit(); this.combat.clear(() => true);
     this.time.echo = null;
   }
 
@@ -110,9 +114,9 @@ export class Game {
   }
 
   labels() {
-    if (this.renderer.xr.isPresenting) return { fly: 'point & squeeze TRIGGER', cast: 'RIGHT GRIP', time: 'LEFT GRIP', cycle: 'B', jump: 'A', hud: 'Y' };
-    if (this.input.touch.on) return { fly: 'FLY, then the left stick', cast: 'CAST', time: 'TIME', cycle: '⟳', jump: 'LEAP', hud: '◎' };
-    return { fly: 'F, then W', cast: 'LEFT CLICK', time: 'E', cycle: 'Q', jump: 'SPACE', hud: 'H' };
+    if (this.renderer.xr.isPresenting) return { fly: 'point & squeeze TRIGGER', cast: 'Hold RIGHT GRIP, release on the flash', slash: 'Swing a controller', time: 'LEFT GRIP', cycle: 'B', jump: 'A', hud: 'Y' };
+    if (this.input.touch.on) return { fly: 'the left stick, once you have leapt', cast: 'Tap, or press and release on the flash,', slash: 'Swipe across the screen', time: 'TIME', cycle: '⟳', jump: 'Double-tap the look side', hud: '◎' };
+    return { fly: 'W, once you have leapt', cast: 'Hold LEFT CLICK, release on the flash', slash: 'V', time: 'E', cycle: 'Q', jump: 'SPACE', hud: 'H' };
   }
 
   // What a cast released after `t` seconds of charge carries.
@@ -149,8 +153,8 @@ export class Game {
     this.started = true;
     const L = this.labels(), fresh = this.state.order.length === 1 && !this.state.inv.water;
     if (fresh) {
-      this.hud.say('Welcome to Thalassa', 'Essence wells up where a pillar of light stands under a gap in the clouds', 8, ELEMENTS.water.css);
-      this.hud.say(`${L.jump} to leap high · ${L.hud} for objectives`, 'Walk into essence to gather it. It becomes your power.', 9);
+      this.hud.say('Welcome to Thalassa', 'Follow the glowing stream from the well to the Tidepool, where Water is won', 8, ELEMENTS.water.css);
+      this.hud.say(`${L.jump} to leap`, `${L.slash} to strike. ${L.hud} for objectives.`, 9);
     } else this.hud.say('Welcome back', this.objective().lines[0], 6);
   }
 
@@ -167,18 +171,21 @@ export class Game {
 
   objective() {
     const s = this.state, L = this.labels();
-    if (s.won) return { lines: ['The Worml network is complete', 'All six worlds are linked. Roam freely.'], goal: null };
+    if (s.finale) return { lines: ['Worml is complete', 'The star is quiet and all six worlds are linked. Roam freely.'], goal: null };
+    if (s.won) return { lines: ['Face the Heliarch at the Sun', 'Fly to the ring that hangs before the star'], goal: 'sun' };
     const id = QUEST.find((q) => !s.open[q]), def = PLANET_BY_ID[id];
     for (const el of Object.keys(def.needs)) {
       const short = def.needs[el] - (s.charge[id][el] || 0) - s.inv[el];
       if (short > 0) {
-        const src = PLANET_BY_ID[SOURCE[el]];
-        return { lines: [`Gather ${short} more ${ELEMENTS[el].label} essence on ${src.name}`, 'Follow a glowing stream upstream from the well, or the radar'], goal: src.id, gather: true };
+        const src = PLANET_BY_ID[SOURCE[el]], T = TRIALS[el];
+        return s.trial[src.id]
+          ? { lines: [`Refill ${ELEMENTS[el].label} at the font on ${src.name}`, `Stand by it at ${T.name}`], goal: src.id, gather: true }
+          : { lines: [`Master ${ELEMENTS[el].label} at ${T.name} on ${src.name}`, 'Follow the glowing stream from the well, or the radar'], goal: src.id, gather: true };
       }
     }
     const here = this.player.planet.def.id === id && this.player.alt < 4000;
     return {
-      lines: here ? [`Break the seal on ${def.name}'s well`, `Aim at it, hold ${L.cast}, release on the flash`]
+      lines: here ? [`Break the seal on ${def.name}'s well`, `${L.cast} aimed at it`]
         : [`Travel to ${def.name}`, this.player.inside ? `Pass through the gate, or ${L.jump} to ride up and fly` : def.lock],
       goal: id,
     };
@@ -193,8 +200,8 @@ export class Game {
     this.audio.unlock();
     this.hud.say(`${def.name}'s well is open`, 'Step into the shaft: its gate hangs at the core of the world', 8, ELEMENTS[def.element].css);
     if (QUEST.every((q) => s.open[q])) {
-      s.won = true;
-      this.hud.say('WORML COMPLETE', 'Every world is linked. The whole system is yours to roam.', 14, '#ffe9a8');
+      s.won = true; this.player.arena = ARENA;
+      this.hud.say('Every world is linked', 'And the star has noticed. Fly to the Sun: the Heliarch is waking.', 14, '#ffe9a8');
       this.audio.win();
     }
     this.save();
@@ -215,9 +222,11 @@ export class Game {
     return { pos: v2.copy(P.pos).add(gate.site).addScaledVector(gate.up, 3).clone(), r: 17, gate };
   }
 
-  hitSeal(el, perfect = false) {
+  hitSeal(el, perfect = false, slash = false) {
     const P = this.player.planet, def = P.def, gate = this.gates.get(def.id), needs = def.needs, ch = this.state.charge[def.id];
     if (!needs || gate.open) return;
+    // a blade carries your element into the seal too, but it still costs the essence
+    if (slash) { if (!el || !needs[el] || (ch[el] || 0) >= needs[el] || this.state.inv[el] <= 0) return; this.state.inv[el]--; }
     if (needs[el] && (ch[el] || 0) < needs[el]) {
       ch[el] = Math.min(needs[el], (ch[el] || 0) + (perfect ? 2 : 1));     // a perfect cast counts double
       gate.flash(ELEMENTS[el].rgb);
@@ -344,6 +353,7 @@ export class Game {
   uiState() {
     const el = this.castEl;
     return { castCss: el ? ELEMENTS[el].css : null, castCount: el ? this.state.inv[el] : 0, weapon: this.time.current(),
+      w0: CAST.W0, w1: CAST.W1,
       charge: this.chargeT < 0 ? 0 : Math.min(1, this.chargeT / CAST.W0), perfect: this.chargeT >= CAST.W0 && this.chargeT <= CAST.W1 };
   }
 
@@ -370,6 +380,14 @@ export class Game {
       if (input.cycleEdge) this.time.cycle(1);
       if (input.select >= 0) this.time.select(input.select);
     }
+    // Flight looks after itself on flat screens: a leap puts you in the air and
+    // flying; coming down to within a few metres of the ground lands you.
+    if (!input.xr) {
+      if (player.inside) input.flyMode = true;
+      else if (!player.leaping && player.alt < 3.5 && this.prevAlt >= 3.5 && !this.transit) input.flyMode = false;
+    }
+    this.prevAlt = player.alt;
+    if (this.started && !s.finale) s.playTime += dt;
     player.update(dt, input);
 
     for (const p of this.planets) p.update(player.pos, wt);
@@ -393,23 +411,51 @@ export class Game {
     if (inside) this.props.group.visible = false; else this.props.update(P, playerLocal, alt);
     this.streaks.update(dt, player.vel, player.speed, inside ? 500 : alt);
 
-    // ---- essence: walk into it and it is yours
-    const hands = [];
-    for (const h of [input.left, input.right]) if (h.active) hands.push({ p: v1.copy(h.pos).sub(P.group.position).clone(), src: h });
-    if (field.group.visible && alt < 2500 && !this.transit && !this.dead) {
-      const got = field.update(dt, wt, hands, headLocal, s.inv[def.element] < CAP);
-      for (const h of got) { this.gain(def.element, 1); input.pulse(h.src, 0.6, 50); }
-      const near = field.nearest(headLocal);
-      if (near.dist < 70 && near.dep.buried && near.dep.undo < 0) {
-        this.tell('buried', 50, 'This deposit lies buried', this.time.has('rewinder') ? `Undo the collapse: aim the Rewinder at it (${L.time})` : 'A collapse covers it. Something that reverses time could undo it.', 6);
-      }
-    } else if (field.group.visible) field.update(dt, wt, [], headLocal, false);
-
     // ---- relics and guardians
     const tHand = input.xr ? input.left : input.right;
     if (this.started && !this.transit && !this.dead && input.timeEdge) this.time.use(tHand);
     this.time.update(dt, time, headLocal);
+    this.trials.update(dt * ws, dt, wt, headLocal);
     combat.update(dt * ws, dt, wt);
+    // Is there anything to attack? On touch screens that turns the open area from look-drags into attack gestures.
+    const sealNear = !gate.open && !inside && gateDist < 130;
+    input.touch.combat = !this.dead && !this.transit && (combat.enemies.some((e) => e.state !== 'idle' && e.state !== 'dead' && e.pos.distanceTo(this.headSolar) < 110) || sealNear || this.trials.active || this.trials.finaleActive);
+
+    // ---- melee: a swing of the controller, a swipe of the screen. Free, short-ranged,
+    // and it carries whatever element you hold most usefully without spending it.
+    this.slashCool -= dt;
+    const canAct = this.started && !this.transit && !this.dead;
+    for (const sl of input.slashes) {
+      if (!canAct || this.slashCool > 0) break;
+      this.slashCool = 0.22;
+      const o = v1.copy(sl.pos).add(player.pos).clone();
+      const el = this.pickElement(o, sl.dir);
+      // a clean cut: the swipe passes through a guardian's head on screen (or, in VR, a full-blooded swing)
+      let clean = sl.power >= 0.95 && !sl.ndc;
+      if (sl.ndc && sl.ndc.path) {
+        for (const e of combat.enemies) {
+          if (e.state === 'dead' || e.pos.distanceTo(this.headSolar) > 45) continue;
+          v2.copy(e.head).sub(player.pos).project(this.camera);
+          if (v2.z < 1 && sl.ndc.path.some((q) => Math.hypot((q[0] - v2.x) * this.camera.aspect, q[1] - v2.y) < 0.16)) { clean = true; break; }
+        }
+      }
+      combat.slash(o, sl.dir, sl.sweep, el, sl.power, clean);
+      if (sl.hand) input.pulse(sl.hand, 0.7, 50);
+      if (clean) this.tell('clean', 12, 'Clean cut', 'A blade drawn through the head hits far harder', 2, '#ffe9a8');
+    }
+    // ---- aimed casts from the screen: a tap (quick) or a press released at the right moment (perfect)
+    for (const sh of input.shots) {
+      if (!canAct) break;
+      const dir = v2.set(sh.ndc[0], sh.ndc[1], 0.5).unproject(this.camera).sub(headScene.setFromMatrixPosition(this.camera.matrixWorld)).normalize().clone();
+      const o = v1.copy(input.right.pos).add(player.pos).clone(), el = this.pickElement(o, dir), pw = this.castPower(sh.t);
+      if (!el) { combat.slash(o, dir, v2.set(1, 0, 0).applyQuaternion(this.camera.getWorldQuaternion(camQ)), null, 0.5, false); this.tell('empty', 8, 'No essence to cast', 'Swipe to strike instead, or win some at a trial', 3); continue; }
+      s.inv[el]--;
+      combat.castPlayer(o, dir, el, pw); this.time.echoCast(el, pw);
+      this.lastCast = pw.label;
+      this.audio.tone(el === 'fire' ? 180 : el === 'water' ? 420 : 300, 0.2, 'triangle', pw.perfect ? 0.2 : 0.12, 0, pw.perfect ? 3 : 2.2);
+      if (pw.perfect) this.tell('perfect', 10, 'Perfect cast', 'Faster, three times the force, and it punches through', 2, ELEMENTS[el].css);
+      hud.poke(); this.save();
+    }
 
     // ---- casting: hold to charge, release to throw. Let go inside the short
     // resonance window (the orb flashes white, a chime sounds) for a perfect cast.
@@ -436,7 +482,7 @@ export class Game {
       if (this.chargeT < 0) {
         if (this.castCool <= 0) {
           if (this.castEl) { this.chargeT = 0; this.chargeEl = this.castEl; }
-          else this.tell('empty', 6, 'No essence to cast', 'Gather some at a deposit: move into the glowing orbs', 3);
+          else this.tell('empty', 6, 'No essence to cast', `${L.slash} to strike instead, or win some at a trial`, 3);
         }
       } else {
         const before = this.chargeT;
@@ -539,17 +585,23 @@ export class Game {
       gm.sub = gate.open ? 'Open' : 'Sealed'; gm.aimed = false;
     }
     hud.setMarker(gm);
-    const dm = { id: 'deposit', visible: false };
-    if (guide && obj.gather && obj.goal === id) {
-      let best = null, bd = 1e9;
-      for (const d of field.deposits) { if (d.buried) continue; const q = d.pos.distanceTo(headLocal); if (q < bd) { bd = q; best = d; } }
-      if (best && bd > 60) {
+    const dm = { id: 'deposit', visible: false }, site = field.site;
+    if (guide && obj.gather && obj.goal === id && site) {
+      const bd = site.pos.distanceTo(headLocal);
+      if (bd > 70) {
         dm.visible = true;
-        dm.dir = v1.copy(best.pos).addScaledVector(best.up, 12 + bd * 0.03).sub(headLocal).normalize().clone();
-        dm.name = `${ELEMENTS[def.element].label} deposit`; dm.css = ELEMENTS[def.element].css; dm.dist = bd; dm.state = 'goal'; dm.sub = 'Essence'; dm.aimed = false;
+        dm.dir = v1.copy(site.pos).addScaledVector(site.up, 12 + bd * 0.03).sub(headLocal).normalize().clone();
+        dm.name = TRIALS[def.element].name; dm.css = ELEMENTS[def.element].css; dm.dist = bd; dm.state = 'goal'; dm.sub = s.trial[id] ? 'Font: refill' : `Win ${ELEMENTS[def.element].label}`; dm.aimed = false;
       }
     }
     hud.setMarker(dm);
+    // the Sun, once it is the goal
+    const ad = player.pos.distanceTo(ARENA), sm = { id: 'sun', visible: s.won && !s.finale && !this.transit && !inside && ad > 400 };
+    if (sm.visible) {
+      sm.dir = v1.copy(ARENA).sub(player.pos).addScaledVector(camUp, ad * 0.03).normalize().clone();
+      sm.name = 'The Sun'; sm.css = '#ffd27a'; sm.dist = ad; sm.state = 'goal'; sm.sub = 'The Heliarch'; sm.aimed = false;
+    }
+    hud.setMarker(sm);
     for (const [key, sign] of [['portalF', 1], ['portalB', -1]]) {
       const to = sign > 0 ? gate.next : gate.prev;
       const pm = { id: key, visible: inside && !!to && !this.transit && (s.order.length > 2 || sign > 0) };
@@ -577,21 +629,17 @@ export class Game {
           blips.push({ a: Math.atan2(x, y), d, kind, css, goal: goal === kind, ...extra });
         };
         add(gate.site, 'well', ELEMENTS[def.element].css, { open: gate.open });
-        for (const d of field.deposits) add(d.pos, 'deposit', ELEMENTS[def.element].css, { buried: d.buried, spent: d.orbs.every((o) => o.state === 2) });
+        if (field.site) add(field.site.pos, 'deposit', ELEMENTS[def.element].css, { buried: !s.trial[id] });
         if (def.anomaly) { const a = this.time.anomaly(P); add(a.pos, 'anomaly', WEAPONS[a.weapon].css, { owned: this.time.has(a.weapon) }); }
         for (const e of combat.enemies) if (e.state === 'chase' || e.state === 'pursue') add(v1.copy(e.pos).sub(P.pos).clone(), 'foe', '#ff5a4a');
       }
-      // of the deposits, ring only the nearest one worth visiting
-      const deps = blips.filter((b) => b.kind === 'deposit' && b.goal);
-      const pickD = deps.filter((b) => !b.buried && !b.spent).sort((p, q) => p.d - q.d)[0];
-      for (const b of deps) b.goal = b === pickD;
       hud.setRadar(onWorld ? blips : null);
     }
 
     hud.update(dt, {
       css: ELEMENTS[def.element].css, linked: s.order.length, visited: Object.keys(s.visited).length,
       objective: obj.lines, inv: s.inv, speed: player.speed, alt,
-      place: inside ? `Inside ${def.name}` : alt < def.radius * 0.6 ? `${def.name} · ${def.title}` : `Deep space · nearest world ${def.name}`,
+      place: ad < 3000 ? 'The ring before the Sun' : inside ? `Inside ${def.name}` : alt < def.radius * 0.6 ? `${def.name} · ${def.title}` : `Deep space · nearest world ${def.name}`,
       health: this.health, castEl: this.castEl, weapon: this.time.current(),
     });
     this.audio.update(player.speed, player.thrusting, def.element, inside ? 1 : 1 - smoothstep(def.radius * 0.05, def.radius * 0.9, alt));

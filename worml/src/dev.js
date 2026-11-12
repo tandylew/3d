@@ -2,7 +2,8 @@
 // judging, quest shortcuts, look/flight tuning and self-playing demos that
 // show each control in action. Opened with the DEV button, the ` key or ?dev.
 import * as THREE from 'three';
-import { PLANETS, ELEMENTS, SUN, terrainRaw } from './worlds.js';
+import { PLANETS, ELEMENTS, SUN, WEAPONS, WEAPON_ORDER, WEAK_TO, terrainRaw } from './worlds.js';
+import { CAST } from './game.js';
 import { FLIGHT } from './player.js';
 import { fmtDist, fmtSpeed } from './hud.js';
 import { mulberry32 } from './noise.js';
@@ -17,7 +18,7 @@ const CTRL = {
   move: { vr: 'Left stick', key: 'W A S D', touch: 'Left stick (right stick looks)', hl: ['stick', 'look'] },
   jump: { vr: 'A or X', key: 'Space', touch: 'LEAP', hl: ['jump'] },
   land: { vr: 'Release below 500 m', key: 'F for flight off', touch: 'FLY off', hl: ['fly'] },
-  cast: { vr: 'Right grip, aim the hand', key: 'Left click', touch: 'CAST', hl: ['cast'] },
+  cast: { vr: 'Hold right grip, release on the flash', key: 'Hold left click, release on the flash', touch: 'Hold CAST, release on the flash', hl: ['cast'] },
   time: { vr: 'Left grip (B switches relic)', key: 'E (Q switches relic)', touch: 'TIME (⟳ switches relic)', hl: ['time'] },
   none: null,
 };
@@ -63,6 +64,15 @@ export class Dev {
       <details open><summary>Control demos</summary>
         <div class="grid two">${demos}</div>
         <p class="note">Each demo plays the game for you and names the control it is using on every device. Esc or Stop ends it.</p>
+      </details>
+      <details open><summary>Spells &amp; relics</summary>
+        <p class="note">Spell: the element your casts spend. Auto picks what the target is weak to.</p>
+        <div class="chips">${['water', 'fire', 'metal', 'wood', 'earth'].map((e) => `<button class="chip" data-spell="${e}" style="--c:${ELEMENTS[e].css}">${ELEMENTS[e].label}</button>`).join('')}<button class="chip sel" data-spell="auto" style="--c:#cfe0ff">Auto</button></div>
+        <div class="grid"><button data-cast="quick">Quick cast<small>tap</small></button><button data-cast="perfect">Perfect cast<small>release on the flash</small></button><button data-cast="over">Overheld<small>held too long</small></button></div>
+        <div class="meter" title="Live charge. The bright band is the perfect window."><u id="dv-charge" style="width:0"></u><b style="left:${(CAST.W0 / CAST.MAX) * 100}%;width:${((CAST.W1 - CAST.W0) / CAST.MAX) * 100}%"></b></div>
+        <div class="grid two">${WEAPON_ORDER.map((w) => `<button data-relic="${w}" style="box-shadow: inset 0 0 0 1px ${WEAPONS[w].css}">${WEAPONS[w].name}<small>${WEAPONS[w].verb} · ${WEAPONS[w].form} · give + use</small></button>`).join('')}</div>
+        <div class="grid"><button data-arsenal="recharge">Recharge relics</button><button data-arsenal="foes">Summon 3</button><button data-arsenal="calm">Dismiss foes</button></div>
+        <div id="dv-arsenal" class="tele"></div>
       </details>
       <details><summary>Quest</summary>
         <div id="dv-quest" class="tele"></div>
@@ -112,6 +122,10 @@ export class Dev {
       else if (d.place) this.warp(this.world, d.place);
       else if (d.demo) this.startDemo(d.demo);
       else if (d.quest) this.quest(d.quest);
+      else if (d.spell) this.spell(d.spell);
+      else if (d.cast) this.castNow(d.cast);
+      else if (d.relic) this.relic(d.relic);
+      else if (d.arsenal) this.arsenal(d.arsenal);
       else if (d.tune) this.resetTuning();
       t.blur();
     });
@@ -292,6 +306,42 @@ export class Dev {
     else if (k === 'hurt') g.hurt(40);
   }
 
+  // ---- spells and relics
+  spell(el) {
+    const g = this.game;
+    g.forceEl = el === 'auto' ? null : el;
+    if (g.forceEl) { g.state.inv[el] = 12; g.hud.poke(); }
+    for (const b of this.el.querySelectorAll('[data-spell]')) b.classList.toggle('sel', b.dataset.spell === el);
+  }
+
+  // Throw a cast of a given quality straight down the current aim.
+  castNow(kind) {
+    const g = this.game, i = this.input;
+    let el = g.castEl;
+    if (!el) { g.grant(12); el = g.forceEl || 'water'; }
+    const pw = g.castPower(kind === 'quick' ? 0.08 : kind === 'perfect' ? (CAST.W0 + CAST.W1) / 2 : CAST.MAX - 0.05);
+    g.state.inv[el] = Math.max(0, g.state.inv[el] - 1);
+    g.combat.castPlayer(v1.copy(i.right.pos).add(g.player.pos).clone(), i.right.dir, el, pw);
+    g.time.echoCast(el, pw);
+    g.lastCast = pw.label; g.hud.poke();
+  }
+
+  relic(id) {
+    const g = this.game, tw = g.time;
+    if (!tw.has(id)) g.state.weapons[id] = true;
+    g.state.sel = id;
+    if (!(id === 'mantle' && tw.echo)) tw.recharge();
+    tw.use(this.input.xr ? this.input.left : this.input.right);
+    g.save();
+  }
+
+  arsenal(k) {
+    const g = this.game;
+    if (k === 'recharge') g.time.recharge();
+    else if (k === 'foes') { this.summon(3); }
+    else if (k === 'calm') g.combat.dropPursuit();
+  }
+
   // Bring the nearest idle guardians of this world to the player, angry.
   summon(n) {
     const g = this.game, c = g.combat, up = g.player.up;
@@ -300,7 +350,7 @@ export class Dev {
     list.forEach((e, i) => {
       const a = (i / n) * Math.PI * 2;
       e.pos.copy(g.headSolar).addScaledVector(t, Math.cos(a) * 32).addScaledVector(b, Math.sin(a) * 32).addScaledVector(up, 5);
-      e.state = 'chase'; e.pacify = 0; e.hp = e.max; e.hist.length = 0;
+      e.state = 'chase'; e.act = 'run'; e.air = false; e.pacify = 0; e.hp = e.max; e.hist.length = 0; for (const l of e.legs) l.set = false;
     });
     return list;
   }
@@ -369,6 +419,14 @@ export class Dev {
     return best;
   }
 
+  // Hold the cast until the charge reaches `to` seconds, then let go.
+  *charged(aimFn, to = (CAST.W0 + CAST.W1) / 2) {
+    const g = this.game, d = this.dbg;
+    d.cast = true;
+    for (let t = 0; t < 2.2 && g.chargeT < to; t += this.dt) { aimFn(); yield; }
+    d.cast = false; aimFn(); yield; yield;
+  }
+
   aimAt(solar) { const g = this.game; this.aim(v2.copy(solar).sub(g.player.pos).sub(g.input.right.pos)); }
 
   *demo_flight() {
@@ -434,12 +492,13 @@ export class Dev {
     if (!foes.length) { this.cap('No guardians near', 'Warp to an essence deposit first'); yield* this.wait(3); this.stopDemo(); return; }
     this.cap('Guardians', 'They gather at deposits and attack when you come close. The demo has filled your essence.', 'none');
     yield* this.wait(2.5);
-    for (let t = 0; t < 40; t += this.dt) {
-      const e = this.nearestFoe(); if (!e) break;
-      this.aimAt(e.pos); d.cast = true;
+    this.cap('Quick casts', 'A tap throws a weak bolt at once. Guardians on the ground may sidestep a slow one.', 'cast');
+    for (let n = 0; n < 3 && this.nearestFoe(); n++) { yield* this.charged(() => { const e = this.nearestFoe(); if (e) this.aimAt(e.head); }, 0.06); yield* this.wait(0.25); }
+    for (let n = 0; n < 14 && this.nearestFoe(); n++) {
       const el = g.castEl;
-      this.cap('Cast your element', el ? `${ELEMENTS[el].label} is chosen for you: what the target is weak to, if you carry it. Health ${Math.round(g.health)}` : 'Out of essence', 'cast');
-      yield;
+      this.cap('Perfect casts', `Hold to charge and release on the white flash: three times the force, twice the speed. Aim for the head. ${el ? ELEMENTS[el].label : ''} · health ${Math.round(g.health)}${g.lastHit ? ` · last hit ${g.lastHit.dmg}` : ''}`, 'cast');
+      yield* this.charged(() => { const e = this.nearestFoe(); if (e) this.aimAt(e.head); });
+      yield* this.wait(0.15);
     }
     d.cast = false;
     this.cap('Essence freed', 'A fallen guardian leaves essence of its own element. Hurt mends after five quiet seconds.', 'none');
@@ -456,8 +515,8 @@ export class Dev {
     yield* this.wait(3);
     g.state.sel = 'pearls'; d.time = true;
     this.cap('Stillwater Pearls: slow', 'Swallow one when you are bombarded. The world crawls; you do not.', 'time');
-    for (let t = 0; t < 5; t += this.dt) { const e = this.nearestFoe(); if (e) { this.aimAt(e.pos); d.cast = true; } yield; }
-    d.cast = false;
+    yield* this.wait(1);
+    for (let n = 0; n < 3; n++) yield* this.charged(() => { const e = this.nearestFoe(); if (e) this.aimAt(e.head); });
     g.state.sel = 'rewinder';
     this.cap('The Rewinder: reverse', 'Shoot a guardian and it retraces its path home. It also un-falls collapsed rock.', 'time');
     for (let t = 0; t < 3; t += this.dt) { const e = this.nearestFoe(); if (e) this.aimAt(e.pos); if (t > 1.2 && e && tw.cool.rewinder <= 0) d.time = true; yield; }
@@ -469,8 +528,7 @@ export class Dev {
     this.cap('Mantle of the Held Moment: freeze', 'Time stops and an echo of you stays behind. Walk away: you are in two places at once.', 'time');
     d.fly = true; d.move.set(0.6, -1); yield* this.wait(4); d.move.set(0, 0);
     this.cap('Two places at once', 'Guardians attack the echo, and it casts whenever you cast', 'cast');
-    for (let t = 0; t < 4; t += this.dt) { const e = this.nearestFoe(); if (e) { this.aimAt(e.pos); d.cast = true; } yield; }
-    d.cast = false;
+    for (let n = 0; n < 3; n++) yield* this.charged(() => { const e = this.nearestFoe(); if (e) this.aimAt(e.head); });
     this.cap('Step back into the echo', 'Use the mantle again and you are where you were', 'time');
     d.time = true; yield* this.wait(3.5);
     this.stopDemo();
@@ -484,9 +542,9 @@ export class Dev {
     g.warpTo(def.id, 0, 46);
     this.cap(`${def.name}'s well is sealed`, def.lock + ' (the demo has granted the essence it needs)');
     yield* this.wait(4);
-    this.cap('Cast at the seal', 'Aim at it: the element it needs is chosen for you', 'cast');
-    for (let t = 0; t < 16 && !gate.open; t += this.dt) { this.aimAt(v1.copy(gate.planet.pos).add(gate.site).addScaledVector(gate.up, 3)); d.cast = t > 1; yield; }
-    d.cast = false;
+    this.cap('Cast at the seal', 'Aim at it: the element it needs is chosen for you. A perfect cast counts double.', 'cast');
+    for (let n = 0; n < 10 && !gate.open && !g.pendingUnlock; n++) yield* this.charged(() => this.aimAt(v1.copy(gate.planet.pos).add(gate.site).addScaledVector(gate.up, 3)));
+    for (let t = 0; t < 6 && !gate.open; t += this.dt) yield;
     this.cap(`${def.name}'s well is open`, 'The seal is gone and the shaft drops to the core, where the gate hangs');
     yield* this.wait(5);
     this.stopDemo();
@@ -558,9 +616,16 @@ export class Dev {
       + row('Frame', `${(1000 / (this.fps || 1)).toFixed(1)} ms avg · ${(worst * 1000).toFixed(0)} ms worst`)
       + row('Draw calls / tris', `${info.calls} / ${(info.triangles / 1000).toFixed(0)}k`)
       + row('Health', `${Math.round(g.health)}${g.dead ? ' · dead' : ''}`) + row('Guardians', `${g.combat.enemies.length} posted · ${g.combat.hunting} hunting · ${g.combat.pursuing} pursuing`)
-      + row('Time', g.time.freezeT > 0 ? 'frozen' : g.time.slowT > 0 ? 'slowed' : 'normal') + row('Relics', g.time.list().join(', ') || 'none')
+      + row('Time', g.time.freezeT > 0 ? 'frozen' : g.time.slowT > 0 ? `slowed to ${g.time.worldScale * 100}% · ${g.time.slowT.toFixed(1)} s left` : 'normal') + row('Relics', g.time.list().join(', ') || 'none')
       + row('Terrain queue', g.manager.pending || 0) + row('Scenery', g.props.count)
       + row('Render', `${this.renderer.domElement.width}×${this.renderer.domElement.height} (${Math.round(this.quality.scale * 100)}%)`);
+    const tw = g.time, lh = g.lastHit;
+    this.$('dv-charge').style.width = `${g.chargeT < 0 ? 0 : Math.min(100, (g.chargeT / CAST.MAX) * 100)}%`;
+    this.$('dv-arsenal').innerHTML = row('Spell', g.forceEl ? ELEMENTS[g.forceEl].label + ' (forced)' : g.castEl ? ELEMENTS[g.castEl].label + ' (auto)' : 'none carried')
+      + row('Last cast', g.lastCast || '–') + row('Last hit', lh ? `${lh.dmg} dmg · x${lh.mult}${lh.perfect ? ' · perfect' : ''}${lh.eye ? ' · eye' : ''} · foe at ${lh.hp} hp` : '–')
+      + row('World time', `${Math.round(tw.worldScale * 100)}%${tw.slowT > 0 ? ` · slow ${tw.slowT.toFixed(1)} s` : ''}${tw.freezeT > 0 ? ` · frozen ${tw.freezeT.toFixed(1)} s` : ''}${tw.echo ? ' · echo out' : ''}`)
+      + row('Pearls / seeds', `${tw.pearls.n}/${tw.pearls.max} · ${tw.seeds.n}/${tw.seeds.max}`)
+      + row('Rewinder / mantle', `${tw.cool.rewinder > 0 ? tw.cool.rewinder.toFixed(1) + ' s' : 'ready'} · ${tw.echo ? 'echo out' : tw.cool.mantle > 0 ? tw.cool.mantle.toFixed(0) + ' s' : 'ready'}`);
     const obj = g.objective();
     this.$('dv-quest').innerHTML = row('Objective', esc(obj.lines[0])) + row('Linked', s.order.join(' → '))
       + row('Essence', Object.entries(s.inv).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(', ') || 'none');

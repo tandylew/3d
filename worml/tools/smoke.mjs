@@ -48,7 +48,16 @@ const result = await page.evaluate(() => {
     dbg.trigger = 0;
     return { sec: sc, vmax };
   };
-  const castAt = (pointFn, maxSec, done) => { let sc = 0; for (; sc < maxSec && !done(); sc += DT) { aimAt(pointFn()); dbg.cast = true; step(); } dbg.cast = false; return sc; };
+  // Charge-and-release casts at a moving point until done(). `hold` is how long to charge (default: the perfect window).
+  const castAt = (pointFn, maxSec, done, hold = 0.82) => {
+    const t0 = t;
+    while (t - t0 < maxSec && !done()) {
+      dbg.cast = true;
+      for (let k = 0; k < 160 && g.chargeT < hold; k++) { aimAt(pointFn()); step(); }
+      dbg.cast = false; aimAt(pointFn()); step(4);
+    }
+    return t - t0;
+  };
   const thal = g.planets[0], field = g.fields.get('thalassa'), home = g.gates.get('thalassa');
 
   // 1. start state
@@ -59,6 +68,9 @@ const result = await page.evaluate(() => {
   check('objectives hidden until asked for', !g.hud.wrist.mesh.visible);
   g.hud.toggleObjectives(); step(3);
   check('objectives toggle on', g.hud.wrist.mesh.visible); g.hud.toggleObjectives();
+  check('only the wellhead keeps a beacon', field.deposits.every((d) => !d.pillar.visible));
+  check('radar shows the well, 8 deposits and the anomaly', g.hud.blips && g.hud.blips.filter((b) => b.kind === 'deposit').length === 8 && g.hud.blips.some((b) => b.kind === 'well') && g.hud.blips.some((b) => b.kind === 'anomaly') && g.hud.radar.mesh.visible, `blips=${g.hud.blips?.length}`);
+  check('streams run from every deposit and the anomaly to the well', thal.uniforms.uTrailA.value.filter((v) => v.w > 0).length === 9);
   check('8 deposits spread over each world, guarded', g.planets.every((q) => g.fields.get(q.def.id).deposits.length === 8) && c.enemies.length === 16, `guardians=${c.enemies.length}`);
 
   // 2. super leap and coming back down
@@ -89,7 +101,19 @@ const result = await page.evaluate(() => {
   let kills = 0; const onKill = g.onKill; g.onKill = (e) => { kills++; onKill.call(g, e); };
   const total = () => Object.values(s.inv).reduce((a, b) => a + b, 0);
   const foe = () => c.enemies.filter((e) => e.state === 'chase' || e.state === 'idle').sort((a, b) => a.pos.distanceTo(g.headSolar) - b.pos.distanceTo(g.headSolar))[0];
-  const spent = castAt(() => foe().pos, 40, () => kills > 0);
+  // guardians are articulated: on the ground their feet are planted and they step
+  flyTo(thal, dep.pos.clone().addScaledVector(dep.up, 2.5), 2, 10); dbg.fly = false; sec(1.5);
+  const w = foe(), feet0 = w.legs.map((l) => l.foot.clone());
+  sec(2.5);
+  const stepped = w.legs.filter((l, i) => l.foot.distanceTo(feet0[i]) > 0.3).length;
+  const footAlt = Math.max(...w.legs.map((l) => { const d = l.foot.clone().sub(thal.pos), r = d.length(); d.divideScalar(r); return Math.abs(r - thal.def.radius - window.worml.groundHeight(thal.def, d.x, d.y, d.z)); }));
+  check('guardians walk on jointed legs', !w.air && w.legs.length === 6 && w.legs.every((l) => l.set) && stepped >= 3 && footAlt < 1.2, `legs=${w.legs.length} stepped=${stepped} worst foot ${footAlt.toFixed(2)} m off the ground, act=${w.act}`);
+  dbg.fly = true; flyTo(thal, dep.pos.clone().addScaledVector(dep.up, 8), 3, 6);
+  check('they take to the air when you do', (() => { sec(2); return c.enemies.some((e) => e.state === 'chase' && e.air); })());
+  const quick = g.castPower(0.08), perfect = g.castPower(0.85), late = g.castPower(1.5);
+  check('a perfect cast carries far more than a quick or overheld one', perfect.perfect && perfect.dmg > quick.dmg * 3 && perfect.speed > quick.speed * 1.8 && late.dmg < perfect.dmg / 2, `quick ${quick.dmg.toFixed(0)}, perfect ${perfect.dmg}, overheld ${late.dmg.toFixed(0)}`);
+  const spent = castAt(() => foe().head, 40, () => kills > 0);
+  check('timed release registers as a perfect hit', g.lastHit && g.lastHit.perfect, JSON.stringify(g.lastHit));
   check('casting essence destroys a guardian', kills > 0, `${spent.toFixed(1)} s, health ${Math.round(g.health)}`);
   check('casting spends essence', total() < 60, `carried ${total()} of 60`);
   sec(6);
@@ -122,8 +146,11 @@ const result = await page.evaluate(() => {
   // 7. break the seal by casting water at it
   s.inv.water = 7;
   const sealPt = () => pyra.pos.clone().add(pg.site).addScaledVector(pg.up, 3);
+  castAt(sealPt, 6, () => (s.charge.pyra.water || 0) >= 1, 0.05);
+  check('a quick cast at the seal counts once', (s.charge.pyra.water || 0) === 1, JSON.stringify(s.charge.pyra));
+  const w0 = s.inv.water;
   castAt(sealPt, 20, () => (s.charge.pyra.water || 0) >= 5);
-  check('water cast at the seal charges it', (s.charge.pyra.water || 0) === 5, JSON.stringify(s.charge.pyra) + ` water left ${s.inv.water}`);
+  check('perfect casts at the seal count double', (s.charge.pyra.water || 0) === 5 && w0 - s.inv.water <= 3, `4 charges for ${w0 - s.inv.water} essence`);
   sec(6);
   check('Pyra well opens and links', pg.open && s.open.pyra && pyra.shaftOpen && pg.next === home && home.next === pg);
 
@@ -175,8 +202,20 @@ const result = await page.evaluate(() => {
   const an = thal.def.anomaly;
   p.place(thal, new THREE.Vector3(an.x, an.y, an.z), 1.2, home.z); c.dropPursuit(); sec(2);
   check('Stillwater Pearls picked up at the Thalassa anomaly', s.weapons.pearls === true && s.sel === 'pearls');
-  dbg.time = true; step(2);
+  // measure a guardian and its bolt at full speed, then under the pearls
+  g.warpTo('thalassa', 0, 60); flyTo(thal, dep.pos.clone().addScaledVector(dep.up, 30), 30, 60);
+  g.health = 100; const [sub] = dev.summon(1); sec(1);
+  const probe = () => { const b = { pos: g.headSolar.clone().addScaledVector(p.up, 500), vel: p.up.clone().multiplyScalar(34), life: 9, from: 'enemy', el: 'water', rgb: [1, 1, 1], size: 0.1, dmg: 0 }; c.bolts.push(b); return b; };
+  const run = () => { const b = probe(), b0 = b.pos.clone(), a0 = sub.age, w0 = g.worldTime, cool0 = sub.cool; let path = 0, last = sub.pos.clone(); for (let k = 0; k < 144; k++) { step(); path += sub.pos.distanceTo(last); last.copy(sub.pos); } return { bolt: b.pos.distanceTo(b0), age: sub.age - a0, world: g.worldTime - w0, path }; };
+  const fast = run();
+  g.health = 100; dbg.time = true; step(2);
   check('pearls slow the world to a fifth', tw.slowT > 0 && tw.worldScale === 0.2 && tw.pearls.n === 2);
+  const slow = run();
+  const own = (() => { const o = p.pos.clone(); flyTo(thal, p.pos.clone().sub(thal.pos).addScaledVector(p.up, 40), 2, 1); return p.pos.distanceTo(o); })();
+  check('slow: guardian bolts crawl at a fifth speed', Math.abs(slow.bolt / fast.bolt - 0.2) < 0.02, `${fast.bolt.toFixed(1)} m -> ${slow.bolt.toFixed(1)} m in 2 s`);
+  check('slow: guardians think and move at a fifth speed', Math.abs(slow.age / fast.age - 0.2) < 0.02 && Math.abs(slow.world / fast.world - 0.2) < 0.02 && slow.path < fast.path * 0.45, `clock ${fast.age.toFixed(2)} -> ${slow.age.toFixed(2)} s, travelled ${fast.path.toFixed(1)} -> ${slow.path.toFixed(1)} m`);
+  check('slow: you still move at full speed', own > 15, `${own.toFixed(0)} m in 1 s`);
+  c.dropPursuit();
   sec(7);
   check('time resumes', tw.worldScale === 1);
   for (const w of ['rewinder', 'seeds', 'mantle']) tw.give(w);

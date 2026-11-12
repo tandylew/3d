@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Worml</title>
 <meta name="description" content="Worml: fly between six elemental worlds and link them with wormholes. A WebXR game for Meta Quest 3.">
 <meta name="theme-color" content="#050814">
@@ -10,6 +10,9 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
 <style>
+  * { touch-action: manipulation; }
+  body.playing, body.playing * { touch-action: none; }
+  body.playing #dev, body.playing #dev * { touch-action: pan-y; }
   html, body { margin: 0; height: 100%; background: #03050c; overflow: hidden; color: #e8eefc;
     font-family: system-ui, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; -webkit-user-select: none; user-select: none;
     -webkit-tap-highlight-color: transparent; }
@@ -60,6 +63,9 @@
   .t-btn[hidden] { display: none; }
   .t-btn.on, .t-btn.demo, .t-stick.demo { background: rgba(122,212,255,0.45); box-shadow: inset 0 0 0 2px #bfe6ff, 0 0 18px rgba(122,212,255,0.6); }
   .t-btn.empty { opacity: 0.45; }
+  /* CAST fills as the charge gathers and flashes when it is time to let go */
+  .t-cast { background: conic-gradient(var(--c) var(--p, 0%), rgba(10,16,32,0.4) 0); }
+  .t-cast.perfect { background: #ffffff; color: #06101e; box-shadow: 0 0 22px #ffffff, inset 0 0 0 2px #fff; }
   .t-btn[data-n]:not([data-n=""])::after { content: attr(data-n); position: absolute; right: -2px; top: -2px; min-width: 20px; height: 20px; border-radius: 10px;
     background: var(--c); color: #06101e; font-size: 12px; display: flex; align-items: center; justify-content: center; }
   .t-cast { right: calc(18px + env(safe-area-inset-right)); bottom: calc(190px + env(safe-area-inset-bottom)); width: 78px; height: 78px; font-size: 14px; }
@@ -100,6 +106,10 @@
   #dev button:hover { background: rgba(255,255,255,0.16); transform: none; }
   #dev button.chip { box-shadow: inset 0 0 0 1px var(--c); }
   #dev button.chip.sel { background: var(--c); color: #06101e; }
+  #dev button small { display: block; font-weight: 400; font-size: 10.5px; opacity: 0.75; }
+  #dev .meter { height: 8px; border-radius: 4px; background: rgba(255,255,255,0.1); overflow: hidden; margin: 2px 0 8px; position: relative; }
+  #dev .meter u { display: block; height: 100%; background: #7ad4ff; }
+  #dev .meter b { position: absolute; top: 0; bottom: 0; background: rgba(255,255,255,0.55); }
   #dev button.link { display: inline; padding: 0; background: none; box-shadow: none; color: #7ad4ff; text-decoration: underline; font-weight: 600; }
   #dev header button { padding: 5px 10px; }
   #dev details { border-top: 1px solid rgba(255,255,255,0.1); padding: 8px 0 10px; }
@@ -139,16 +149,16 @@
       <span class="h">Quest controllers</span>
       <b>Trigger</b><span>Fly where that hand points. Higher is faster.</span>
       <b>Sticks</b><span>Left: walk · Right: snap turn, up / down</span>
-      <b>Right grip · Left grip</b><span>Cast your element · use the time relic</span>
+      <b>Right grip · Left grip</b><span>Hold to charge a cast, release on the flash · time relic</span>
       <b>A / X · B · Y</b><span>Super leap · switch relic · objectives</span>
       <span class="h">Phone &amp; tablet</span>
       <b>Left · right stick</b><span>Move · look</span>
       <b>FLY · LEAP</b><span>Toggle flight · giant leap into the sky</span>
-      <b>CAST · TIME</b><span>Cast your element · use the time relic</span>
+      <b>CAST · TIME</b><span>Hold to charge, release on the flash · time relic</span>
       <span class="h">Mouse &amp; keyboard</span>
       <b>Mouse · W A S D</b><span>Look · move (F toggles flight, R / C up / down)</span>
       <b>Space · H</b><span>Super leap · objectives</span>
-      <b>Click · E · Q</b><span>Cast your element · time relic · switch relic</span>
+      <b>Click · E · Q</b><span>Hold to charge, release on the flash · relic · switch</span>
     </div>
     <button id="reset" class="ghost">Reset progress</button>
   </div>

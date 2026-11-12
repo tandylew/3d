@@ -59,7 +59,7 @@ export class EssenceField {
       g.add(new THREE.Mesh(fontGeo, fontMat));
       const pu = { uColor: { value: new THREE.Vector3(...rgb) }, uTime: ENV.uTime, uAlpha: { value: 0.5 } };
       const pillar = new THREE.Mesh(pillarGeo, new THREE.ShaderMaterial({ vertexShader: uvVS, fragmentShader: pillarFS, uniforms: pu, side: THREE.DoubleSide, ...additive }));
-      pillar.frustumCulled = false; pillar.renderOrder = 3;
+      pillar.frustumCulled = false; pillar.renderOrder = 3; pillar.visible = false;   // deposits are found by stream, weather and radar now, not by beacon
       g.add(pillar);
       const orbs = [];
       for (let i = 0; i < PER; i++) {

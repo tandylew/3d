@@ -3,6 +3,7 @@ import { Input } from './input.js';
 import { Audio } from './audio.js';
 import { Game, SAVE_KEY } from './game.js';
 import { TouchControls } from './touch.js';
+import { groundHeight } from './worlds.js';
 import { Dev } from './dev.js';
 
 const $ = (id) => document.getElementById(id);
@@ -106,6 +107,21 @@ function enterFlat(lockPointer = true) {
   game.begin();
 }
 
+// Stop the browser zooming the page: pinch (two thumbs on the sticks reads as
+// one), double-tap, and Safari's gesture events, which ignore the viewport tag.
+for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+document.addEventListener('touchmove', (e) => { if (e.touches.length > 1 || playing) { if (!e.target.closest?.('#dev')) e.preventDefault(); } }, { passive: false });
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+  const now = performance.now();
+  if (now - lastTouchEnd < 350 && playing && !e.target.closest?.('#dev, #topbar')) e.preventDefault();   // double-tap
+  lastTouchEnd = now;
+}, { passive: false });
+document.addEventListener('dblclick', (e) => e.preventDefault());
+addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });               // trackpad pinch
+// If the page does end up zoomed (an OS accessibility gesture), keep the canvas matched to what is visible.
+visualViewport?.addEventListener('resize', () => { if (visualViewport.scale !== 1) scrollTo(0, 0); });
+
 // A finger on the screen switches to touch controls even on hybrid devices.
 addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch' && playing && !touch.enabled) { document.exitPointerLock?.(); setTouch(true); } }, true);
 
@@ -159,4 +175,4 @@ renderer.setAnimationLoop(() => {
 });
 
 // Handy for debugging and automated tests.
-window.worml = { game, input, renderer, scene, camera, rig, THREE, dev, touch, quality, get ready() { return ready; } };
+window.worml = { game, input, renderer, scene, camera, rig, THREE, dev, touch, quality, groundHeight, get ready() { return ready; } };

@@ -57,6 +57,11 @@ export class Hud {
     this.vitals.mesh.material.opacity = 0;
     camera.add(this.vitals.mesh);
     this.vitalsT = 0; this.vitalsKey = '';
+    // Radar: a small disc showing what lies around you. Up is where you face;
+    // distance is logarithmic, so the far side of the world still fits.
+    this.radar = panel(0.16, 0.16, 256, 256);
+    this.radar.mesh.visible = false;
+    this.radarOn = true; this.blips = null; this.radarParent = null;
     // Veil: full-view tint for damage, time effects and fades.
     this.veilU = { uTint: { value: new THREE.Vector4(1, 0, 0, 0) }, uFade: { value: new THREE.Vector4(0, 0, 0, 0) } };
     this.veil = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ vertexShader: uvVS, fragmentShader: veilFS, uniforms: this.veilU, transparent: true, depthTest: false, depthWrite: false }));
@@ -67,6 +72,41 @@ export class Hud {
   say(title, sub = '', seconds = 5, color = '#ffffff') {
     this.toastQueue.push({ title, sub, seconds, color });
     if (this.toastQueue.length > 3) this.toastQueue.shift();
+  }
+
+  setRadar(blips) { this.blips = blips; this.radarDirty = true; }
+
+  drawRadar() {
+    const { ctx, tex } = this.radar, C = 128, R = 112;
+    ctx.clearRect(0, 0, 256, 256);
+    ctx.beginPath(); ctx.arc(C, C, R, 0, 6.3); ctx.fillStyle = 'rgba(6,10,22,0.5)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 2; ctx.stroke();
+    const rad = (d) => Math.min(1, Math.log(1 + d / 12) / Math.log(1 + 45000 / 12)) * (R - 10);
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    for (const d of [100, 1000, 10000]) { ctx.beginPath(); ctx.arc(C, C, rad(d), 0, 6.3); ctx.stroke(); }
+    // you, facing up
+    ctx.beginPath(); ctx.moveTo(C, C - 9); ctx.lineTo(C + 6, C + 6); ctx.lineTo(C - 6, C + 6); ctx.closePath(); ctx.fillStyle = '#ffffff'; ctx.fill();
+    const pt = (b) => { const r = rad(b.d); return [C + Math.sin(b.a) * r, C - Math.cos(b.a) * r]; };
+    const well = this.blips.find((b) => b.kind === 'well');
+    // streams: every deposit is joined to the well
+    if (well) {
+      const [wx, wy] = pt(well);
+      for (const b of this.blips) {
+        if (b.kind !== 'deposit' && b.kind !== 'anomaly') continue;
+        const [x, y] = pt(b);
+        ctx.strokeStyle = b.css; ctx.globalAlpha = 0.35; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(wx, wy); ctx.lineTo(x, y); ctx.stroke(); ctx.globalAlpha = 1;
+      }
+    }
+    for (const b of this.blips) {
+      const [x, y] = pt(b);
+      ctx.fillStyle = ctx.strokeStyle = b.css; ctx.lineWidth = 3;
+      if (b.kind === 'well') { ctx.beginPath(); ctx.arc(x, y, 9, 0, 6.3); ctx.stroke(); if (b.open) { ctx.beginPath(); ctx.arc(x, y, 3.5, 0, 6.3); ctx.fill(); } }
+      else if (b.kind === 'deposit') { ctx.globalAlpha = b.spent ? 0.4 : 1; ctx.beginPath(); ctx.arc(x, y, 6, 0, 6.3); if (b.buried) ctx.stroke(); else ctx.fill(); ctx.globalAlpha = 1; }
+      else if (b.kind === 'anomaly') { ctx.globalAlpha = b.owned ? 0.4 : 1; ctx.beginPath(); ctx.moveTo(x, y - 9); ctx.lineTo(x + 7, y); ctx.lineTo(x, y + 9); ctx.lineTo(x - 7, y); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1; }
+      else { ctx.beginPath(); ctx.arc(x, y, 4.5, 0, 6.3); ctx.fill(); }
+      if (b.goal) { ctx.strokeStyle = '#ffe9a8'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 13, 0, 6.3); ctx.stroke(); }
+    }
+    tex.needsUpdate = true;
   }
 
   toggleObjectives() { this.showObjectives = !this.showObjectives; return this.showObjectives; }
@@ -215,6 +255,19 @@ export class Hud {
     wm.visible = this.showObjectives;
     this.wristTimer -= dt;
     if (wm.visible && this.wristTimer <= 0) { this.wristTimer = 0.2; this.drawWrist(state); }
+
+    // --- radar: on the left wrist in VR, in a corner of the screen otherwise
+    const rm = this.radar.mesh, rParent = this.input.xr && leftCtrl ? leftCtrl.ray : this.camera;
+    if (rm.parent !== rParent) { rParent.add(rm); if (rParent !== this.camera) { rm.position.set(-0.13, 0.08, 0.05); rm.rotation.set(-1.0, 0, 0); rm.scale.setScalar(0.75); } }
+    rm.visible = this.radarOn && !!this.blips;
+    if (rm.visible && this.radarDirty) { this.radarDirty = false; this.drawRadar(); }
+    if (rm.visible && rParent === this.camera) {
+      const d = 0.75, hh = Math.tan((this.camera.fov * Math.PI) / 360) * d, hw = hh * this.camera.aspect, touch = this.input.touch.on;
+      const sc = Math.min((hh * 2 * (touch ? 0.26 : 0.24)) / 0.16, (hw * 2 * 0.3) / 0.16), m = Math.min(hw, hh) * 0.05;
+      rm.scale.setScalar(sc); rm.rotation.set(0, 0, 0);
+      // touch: bottom centre, between the thumbs. Desktop: top left.
+      if (touch) rm.position.set(0, -hh + m + 0.08 * sc, -d); else rm.position.set(-hw + m + 0.08 * sc, hh - m - 0.08 * sc, -d);
+    }
 
     // --- vitals strip
     const vm = this.vitals.mesh, cam = this.camera;

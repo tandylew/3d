@@ -28,7 +28,7 @@ Then open `http://localhost:8080/` in the Quest Browser.
 | Walk / strafe | Left stick | `W A S D` | Left stick |
 | Look / turn | Head; right stick snap-turns | Mouse | Right stick |
 | Super leap | `A` or `X` | `Space` | **LEAP** |
-| Cast your element | Right grip, aimed with that hand | Left click | **CAST** |
+| Cast your element | Hold right grip to charge, release to throw | Hold left click (or `X`), release | Hold **CAST**, release |
 | Use the time relic | Left grip, aimed with that hand | `E` or right click | **TIME** |
 | Switch relic | `B` | `Q`, wheel, `1`-`4` | **⟳** |
 | Objectives | `Y` (on the left wrist) | `H` | **◎** |
@@ -39,9 +39,17 @@ With flight off you walk, and sink if you are in the air. With flight on you hov
 
 ## The game
 
-**Essence is your power.** Every world has eight essence deposits spread over the whole globe. Nothing marks them on a map; the world does: each sits in a ringed crater, the ground around it is veined with light, a pillar of light stands over it, the cloud deck opens in a clear eye above it (visible from orbit as a ring of cloud), and guardians circle it. Move into the orbs and they fly to you. You carry up to 12 of each element, and each cast spends one.
+**Essence is your power.** Every world has eight essence deposits spread over the whole globe. Move into the orbs and they fly to you. You carry up to 12 of each element, and each cast spends one.
 
-**Guardians** are made of their world's element. They attack when you come near a deposit, they have health bars, and they are weak to the element that overcomes theirs (water douses fire, fire melts metal, metal cuts wood, wood breaks earth, earth dams water). When you aim at one, the element it is weak to is chosen for you if you carry it. A fallen guardian leaves a mote of its own element. If you fly away, up to six will chase you through open space under the same speed rule you fly by, and arrive a little after you do. Only a wormhole shakes them.
+**Finding your way.** There is one beacon per world: the pillar of light over its wellhead. Everything else is found three ways:
+
+- **Streams.** A glowing stream of essence runs from every deposit to the wellhead, and a pale gold one from the world's time anomaly. Follow any stream upstream from the well and you arrive at its source. They meander like rivers, widen with distance so you can follow them from the air, and from orbit they are bright threads converging on the well.
+- **Radar.** A small disc (bottom centre on phones, top left on desktop, on the left wrist in VR) shows what lies around you. Up is the way you face and distance is logarithmic, so the far side of the world still fits. Ring: the well. Dots: deposits (hollow if buried, dim if spent), joined to the well by their streams. Diamond: the time anomaly. Red: guardians hunting you. A gold circle marks your current objective.
+- **The world itself.** Each deposit sits in a ringed crater veined with light, the cloud deck opens in a clear eye above it (a ring of cloud from orbit), and guardians patrol it.
+
+**Casting takes timing and aim.** Hold the cast control and a charge gathers at your hand. About 0.7 s in, the orb flashes white and a chime sounds: release inside that quarter-second window for a **perfect cast** (roughly three times the force of a tap, twice the speed, and it punches through its first target). Release early and you get a weaker bolt; hold past the flash and the charge sours. A bolt through a guardian's **head** hits 1.6 times as hard. A perfect cast at a seal counts double. Casts are not homing: you lead a moving target yourself.
+
+**Guardians** are made of their world's element and walk on jointed legs (four or six, depending on the world), feet planted on the actual ground. They patrol their deposit, run you down, crouch and pounce, rear up to spit bolts, and may spring aside from a bolt they see coming, which is why the fast perfect cast matters. If you take to the air they launch after you, legs trailing. They have health bars and are weak to the element that overcomes theirs (water douses fire, fire melts metal, metal cuts wood, wood breaks earth, earth dams water); the right element is chosen for you if you carry it. A fallen guardian leaves a mote of its own element. If you fly away, up to six will chase you through open space under the same speed rule you fly by. Only a wormhole shakes them.
 
 **Health.** You have 100. After five seconds without being hit you mend quickly. At zero you are unmade: half your essence scatters and you reform at the wellhead of the world you were on.
 
@@ -62,7 +70,7 @@ Step into an open well and the shaft carries you down (fastest mid-shaft, gentle
 
 | Relic | Form | Found on | The sign | What it does |
 | --- | --- | --- | --- | --- |
-| Stillwater Pearls | pills | Thalassa | rain hanging in the air, barely falling | **Slows** the world to a fifth for six seconds while you move normally. Three pearls, each regrows. |
+| Stillwater Pearls | pills | Thalassa | rain hanging in the air, barely falling | **Slows** the world to a fifth for six seconds: guardians run, think, wind up and dodge at a fifth speed and their bolts crawl, while you and your own bolts move normally. Their eyes turn pale blue while it lasts. Three pearls, each regrows. |
 | The Rewinder | gun | Pyra | embers flying backward into the fire | **Reverses**: a guardian retraces its path home, healed and pacified (a pursuer from another world unravels entirely). It also un-falls the rubble on buried deposits. |
 | Quickening Seeds | grenade | Sylva | a tree living its whole life every few seconds | **Speeds** time where it lands: a great tree grows in a breath, its roots seize and age guardians, and spent essence nearby regrows at once. |
 | Mantle of the Held Moment | cape | Petra | a dust storm frozen in mid-air | **Freezes** the world for five seconds and leaves an echo of you behind. When time resumes the echo draws the guardians' fire and casts whenever you cast; use the mantle again to step back into it. |
@@ -76,6 +84,7 @@ Open it with the **DEV** button (top right while playing), the **Dev dashboard**
 - **Telemetry**: world, altitude, speed and speed limit, sun elevation, frame time, draw calls, triangles, terrain queue, render resolution.
 - **Warp**: pick a world, then a place: wellhead, core gate, essence deposit, time anomaly, shore, summit, sunset, night side, above the clouds, low orbit, far view. Also the sun, a system overview and deep space. To judge a spot in the headset, warp there and use "enter VR from here".
 - **Control demos**: the game plays itself (take off and land; walk and super leap; gather essence; fight guardians; all four time relics; break a seal; fall to the core, pass the gate and ride back up; fly to another world) and names the control it is using on Quest, keyboard and touch.
+- **Spells and relics**: pick the element your casts spend (or Auto); throw a quick, perfect or overheld cast on demand; give and fire each of the four relics; recharge them; summon or dismiss guardians. A live meter shows the charge against the perfect window, and a readout shows the last cast, the last hit (damage, multiplier, perfect, eye strike) and the world's time scale.
 - **Quest**: unseal the next gate or all of them, fill or empty essence, give all relics, summon guardians, heal or take damage, reset.
 - **Look and flight tuning**: exposure, sun angle (lighting preview), cloud cover, render scale, flight speed constants, and toggles for clouds, atmosphere, scenery, markers and wireframe.
 - **Controls and live input**: the mapping table plus live bars for what the game is receiving.
@@ -138,7 +147,7 @@ All three run the real game in headless Chromium (Playwright must be available).
 
 - Worlds do not rotate or orbit, so each wellhead sits in permanent daylight.
 - You hover over liquids rather than swim.
-- Guardians are one behaviour (circle, chase, shoot) in six elemental bodies; there are no bosses.
+- Guardians share one skeleton and one set of behaviours in six elemental bodies; there are no bosses. Their feet follow the ground under the body, not each footfall.
 - Clouds cast shadows; terrain and scenery do not shadow each other. Clouds are a single thin layer, so flying through it shows no volume.
 - The dev dashboard is a 2D page overlay and is not visible inside VR; warp first, then enter VR.
 - Not yet profiled on a physical headset. If frame rate dips, try the dashboard toggles first (clouds, scenery), then lower `MAX_LEVEL` or `GRID` in `src/planet.js` / `src/cubesphere.js`.

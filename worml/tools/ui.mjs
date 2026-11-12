@@ -46,6 +46,17 @@ const watch = (page) => { page.on('console', (m) => { if (m.type() === 'error') 
   s = await state();
   check('phone: left stick walks forward', s.my > 0.8 && Math.abs(s.mx) < 0.2 && s.trig === 0, `move=(${s.mx.toFixed(2)}, ${s.my.toFixed(2)})`);
   check('phone: right stick turns the view', Math.abs(s.yaw - yaw0) > 0.2, `yaw ${yaw0.toFixed(2)} -> ${s.yaw.toFixed(2)}`);
+  check('phone: two thumbs do not zoom the page', await page.evaluate(() => (window.visualViewport?.scale ?? 1) === 1 && getComputedStyle(document.body).touchAction === 'none' && getComputedStyle(document.querySelector('canvas')).touchAction === 'none'));
+  // a pinch (fingers moving apart) and a double tap must leave the scale alone too
+  await touch('touchEnd', []); await page.waitForTimeout(300);
+  await touch('touchStart', [{ x: vp.width * 0.4, y: vp.height * 0.4, id: 1 }, { x: vp.width * 0.6, y: vp.height * 0.4, id: 2 }]);
+  for (let i = 1; i <= 8; i++) await touch('touchMove', [{ x: vp.width * 0.4 - i * 12, y: vp.height * 0.4, id: 1 }, { x: vp.width * 0.6 + i * 12, y: vp.height * 0.4, id: 2 }]);
+  await touch('touchEnd', []);
+  for (let k = 0; k < 2; k++) { await touch('touchStart', [{ x: vp.width * 0.5, y: vp.height * 0.3, id: 5 }]); await touch('touchEnd', []); await page.waitForTimeout(90); }
+  await page.waitForTimeout(600);
+  check('phone: pinch and double tap do not zoom', await page.evaluate(() => (window.visualViewport?.scale ?? 1) === 1 && window.innerWidth === document.documentElement.clientWidth));
+  check('phone: radar is shown', await page.evaluate(() => window.worml.game.hud.radar.mesh.visible));
+  await touch('touchStart', [{ x: lx, y: ly, id: 1 }]);
   await page.screenshot({ path: 'shots/ui-phone.png' });
   // FLY is a toggle: with it on, the same stick flies where you look
   await touch('touchEnd', []); await page.waitForTimeout(800);
@@ -127,6 +138,29 @@ const watch = (page) => { page.on('console', (m) => { if (m.type() === 'error') 
     await page.waitForTimeout(wait);
     await page.screenshot({ path: `shots/ui-${w}-${pl}.png` });
   }
+  // spells and relics panel
+  const ars = () => page.evaluate(() => { const g = window.worml.game; return { force: g.forceEl, fire: g.state.inv.fire, bolts: g.combat.bolts.filter((b) => b.from === 'player').length, perfect: g.combat.bolts.some((b) => b.perfect), slow: g.time.slowT, sel: g.state.sel, owned: Object.keys(g.state.weapons).length, blooms: g.time.blooms.length + g.time.grenades.length, echo: !!g.time.echo, last: g.lastCast }; });
+  await page.click('[data-spell="fire"]');
+  let a = await ars();
+  check('desktop: spell buttons force the cast element', a.force === 'fire' && a.fire === 12);
+  await page.click('[data-cast="perfect"]'); await page.waitForTimeout(150);
+  a = await ars();
+  check('desktop: perfect cast on demand', a.last === 'perfect' && a.fire === 11, JSON.stringify(a));
+  await page.click('[data-cast="quick"]'); await page.click('[data-cast="over"]');
+  check('desktop: quick and overheld casts on demand', (await ars()).fire === 9);
+  await page.click('[data-spell="auto"]');
+  check('desktop: Auto clears the forced element', (await ars()).force === null);
+  await page.click('[data-relic="pearls"]'); await page.waitForTimeout(100);
+  a = await ars();
+  check('desktop: relic button gives and uses the Pearls', a.slow > 0 && a.sel === 'pearls');
+  await page.click('[data-relic="seeds"]'); await page.waitForTimeout(100);
+  check('desktop: relic button throws a Quickening Seed', (await ars()).blooms === 1);
+  await page.click('[data-relic="mantle"]'); await page.waitForTimeout(100);
+  check('desktop: relic button raises the Mantle echo', (await ars()).echo);
+  await page.click('[data-relic="rewinder"]'); await page.waitForTimeout(100);
+  check('desktop: all four relics owned after using each', (await ars()).owned === 4);
+  check('desktop: arsenal readout is live', (await page.textContent('#dv-arsenal')).includes('World time'));
+  await page.click('[data-arsenal="calm"]');
   // quest shortcuts
   await page.click('summary:has-text("Quest")');
   await page.click('[data-quest="next"]');

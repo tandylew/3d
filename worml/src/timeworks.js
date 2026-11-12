@@ -106,6 +106,9 @@ export class Timeworks {
 
   get owned() { return this.game.state.weapons; }
   get worldScale() { return this.freezeT > 0 ? 0 : this.slowT > 0 ? 0.2 : 1; }
+
+  // Dev dashboard: every count full, every cooldown clear.
+  recharge() { this.pearls.n = this.pearls.max; this.seeds.n = this.seeds.max; this.cool.rewinder = this.cool.mantle = 0; }
   has(id) { return !!this.owned[id]; }
   list() { return WEAPON_ORDER.filter((w) => this.owned[w]); }
 
@@ -195,12 +198,12 @@ export class Timeworks {
   }
 
   // When you cast, your echo casts too, at whatever is nearest it.
-  echoCast(el) {
+  echoCast(el, power) {
     const e = this.echo, g = this.game; if (!e) return;
     const from = v1.copy(e.pos).addScaledVector(v2.set(0, 1.4, 0).applyQuaternion(e.quat), 1).clone();
     let best = null, bd = 120;
     for (const en of g.combat.enemies) { if (en.state === 'dead') continue; const d = en.pos.distanceTo(from); if (d < bd) { bd = d; best = en; } }
-    if (best) g.combat.castPlayer(from, v2.copy(best.pos).sub(from).normalize(), el, true);
+    if (best) g.combat.castPlayer(from, v2.copy(best.head).sub(from).normalize(), el, power, true);
   }
 
   bloom(planet, local) {
@@ -238,7 +241,7 @@ export class Timeworks {
     const pu = { uColor: { value: new THREE.Vector3(...WEAPONS[w].rgb) }, uTime: ENV.uTime, uAlpha: { value: 0.5 } };
     const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1, 0.55, 1, 16, 1, true).translate(0, 0.5, 0),
       new THREE.ShaderMaterial({ vertexShader: uvVS, fragmentShader: pillarFS, uniforms: pu, side: THREE.DoubleSide, ...additive }));
-    pillar.frustumCulled = false; pillar.renderOrder = 3; g.add(pillar);
+    pillar.frustumCulled = false; pillar.renderOrder = 3; pillar.visible = false; g.add(pillar);
     let tree = null;
     if (w === 'seeds') {
       this.treeGeo = this.treeGeo || treeGeometry();

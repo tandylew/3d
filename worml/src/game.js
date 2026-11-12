@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { PLANETS, PLANET_BY_ID, ELEMENTS, ELEMENT_ORDER, WEAK_TO, WEAPONS } from './worlds.js';
 import { smoothstep } from './noise.js';
-import { makeDetailTexture, syncEnv } from './gfx.js';
+import { makeDetailTexture, syncEnv, glowMaterial } from './gfx.js';
 import { Planet, TerrainManager } from './planet.js';
 import { Sky } from './sky.js';
 import { Player } from './player.js';
@@ -19,6 +19,8 @@ export const SAVE_KEY = 'worml-save-v2';
 const QUEST = ['thalassa', 'pyra', 'ferrum', 'sylva', 'petra', 'arcana'];
 const SOURCE = { water: 'thalassa', fire: 'pyra', metal: 'ferrum', wood: 'sylva', earth: 'petra', magic: 'arcana' };
 const CAP = 12;
+// Casting: hold to gather the charge, let go inside the resonance window for a perfect cast.
+export const CAST = { W0: 0.7, W1: 0.98, MAX: 1.7 };
 
 const headScene = new THREE.Vector3(), headLocal = new THREE.Vector3(), playerLocal = new THREE.Vector3();
 const gl = new THREE.Vector3(), v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), camUp = new THREE.Vector3(), camQ = new THREE.Quaternion();
@@ -56,6 +58,10 @@ export class Game {
     this.started = false; this.clock = 0; this.worldTime = 0;
     this.health = 100; this.hurtT = 99; this.hurtFlash = 0; this.dead = null;
     this.castCool = 0; this.castEl = null; this.told = {}; this.tellT = {};
+    this.chargeT = -1; this.castLock = false; this.forceEl = null; this.lastHit = null; this.lastCast = ''; this.radarT = 0;
+    this.chargeOrb = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 2), glowMaterial([1, 1, 1], 1.6, 1.5));
+    this.chargeOrb.visible = false; this.chargeOrb.frustumCulled = false; this.chargeOrb.renderOrder = 8;
+    scene.add(this.chargeOrb);
     this.headSolar = new THREE.Vector3();
 
     this.state = freshState();
@@ -109,6 +115,15 @@ export class Game {
     return { fly: 'F, then W', cast: 'LEFT CLICK', time: 'E', cycle: 'Q', jump: 'SPACE', hud: 'H' };
   }
 
+  // What a cast released after `t` seconds of charge carries.
+  castPower(t) {
+    const { W0, W1, MAX } = CAST;
+    if (t < W0) { const f = t / W0; return { dmg: 14 + 26 * f * f, speed: 110 + 40 * f, size: 0.26 + 0.12 * f, perfect: false, label: f < 0.25 ? 'quick' : 'early' }; }
+    if (t <= W1) return { dmg: 72, speed: 240, size: 0.62, perfect: true, label: 'perfect' };
+    const f = Math.min(1, (t - W1) / (MAX - W1));
+    return { dmg: 34 - 22 * f, speed: 120, size: 0.34, perfect: false, label: 'overheld' };
+  }
+
   // Say something once per `gap` seconds at most (hints that could otherwise nag).
   tell(key, gap, title, sub, sec = 5, css = '#ffffff') {
     if ((this.tellT[key] || -1e9) + gap > this.clock) return;
@@ -158,12 +173,12 @@ export class Game {
       const short = def.needs[el] - (s.charge[id][el] || 0) - s.inv[el];
       if (short > 0) {
         const src = PLANET_BY_ID[SOURCE[el]];
-        return { lines: [`Gather ${short} more ${ELEMENTS[el].label} essence on ${src.name}`, 'Deposits: craters under pillars of light and gaps in the cloud'], goal: src.id, gather: true };
+        return { lines: [`Gather ${short} more ${ELEMENTS[el].label} essence on ${src.name}`, 'Follow a glowing stream upstream from the well, or the radar'], goal: src.id, gather: true };
       }
     }
     const here = this.player.planet.def.id === id && this.player.alt < 4000;
     return {
-      lines: here ? [`Break the seal on ${def.name}'s well`, `Aim at it and ${L.cast}`]
+      lines: here ? [`Break the seal on ${def.name}'s well`, `Aim at it, hold ${L.cast}, release on the flash`]
         : [`Travel to ${def.name}`, this.player.inside ? `Pass through the gate, or ${L.jump} to ride up and fly` : def.lock],
       goal: id,
     };
@@ -200,16 +215,16 @@ export class Game {
     return { pos: v2.copy(P.pos).add(gate.site).addScaledVector(gate.up, 3).clone(), r: 17, gate };
   }
 
-  hitSeal(el) {
+  hitSeal(el, perfect = false) {
     const P = this.player.planet, def = P.def, gate = this.gates.get(def.id), needs = def.needs, ch = this.state.charge[def.id];
     if (!needs || gate.open) return;
     if (needs[el] && (ch[el] || 0) < needs[el]) {
-      ch[el] = (ch[el] || 0) + 1;
+      ch[el] = Math.min(needs[el], (ch[el] || 0) + (perfect ? 2 : 1));     // a perfect cast counts double
       gate.flash(ELEMENTS[el].rgb);
       this.audio.deliver(el);
       const done = Object.keys(needs).reduce((n, k) => n + Math.min(ch[k] || 0, needs[k]), 0), total = Object.values(needs).reduce((a, b) => a + b, 0);
       if (done >= total) this.pendingUnlock = { gate, t: 0.8 };
-      else this.hud.say(`The seal weakens: ${done} / ${total}`, '', 1.6, ELEMENTS[el].css);
+      else this.hud.say(`The seal weakens: ${done} / ${total}`, perfect ? 'Perfect cast: counts double' : '', 1.6, ELEMENTS[el].css);
       this.save();
     } else {
       const want = Object.keys(needs).filter((k) => (ch[k] || 0) < needs[k]).map((k) => ELEMENTS[k].label).join(', ');
@@ -222,7 +237,7 @@ export class Game {
     s.inv[el] = Math.min(CAP, s.inv[el] + n);
     this.audio.pickup(el);
     this.hud.poke();
-    if (!this.told.power) { this.told.power = true; this.hud.say(`${ELEMENTS[el].label} essence is now your power`, `${this.labels().cast} to cast it at guardians and seals. Each cast spends one.`, 7, ELEMENTS[el].css); }
+    if (!this.told.power) { this.told.power = true; this.hud.say(`${ELEMENTS[el].label} essence is now your power`, `Hold ${this.labels().cast} to charge, release as the orb flashes white for a perfect cast`, 8, ELEMENTS[el].css); }
     this.save();
   }
 
@@ -251,9 +266,12 @@ export class Game {
 
   onPursue() { this.tell('pursue', 60, 'They are following you', 'Guardians chase through open space. Only a wormhole shakes them.', 6, '#ff8a7a'); }
 
-  onHit(e, mult) {
-    if (mult > 1.5 && !this.told.weak) { this.told.weak = true; this.hud.say('Overcome!', `${ELEMENTS[WEAK_TO[e.el]].label} overcomes ${ELEMENTS[e.el].label}`, 3, ELEMENTS[WEAK_TO[e.el]].css); }
-    this.audio.tone(mult > 1.5 ? 520 : 300, 0.12, 'triangle', 0.12);
+  onHit(e, mult, eye, b) {
+    this.lastHit = { dmg: Math.round(b.dmg * mult), mult: +mult.toFixed(2), eye, perfect: b.perfect, el: b.el, hp: Math.max(0, Math.round(e.hp)) };
+    if (mult > 1.5 && WEAK_TO[e.el] === b.el && !this.told.weak) { this.told.weak = true; this.hud.say('Overcome!', `${ELEMENTS[WEAK_TO[e.el]].label} overcomes ${ELEMENTS[e.el].label}`, 3, ELEMENTS[WEAK_TO[e.el]].css); }
+    if (eye) this.tell('eye', 8, 'Eye strike', 'A bolt through the head hits 1.6x as hard', 2, '#ffe9a8');
+    this.audio.tone(eye ? 700 : mult > 1.5 ? 520 : 300, 0.12, 'triangle', 0.12);
+    if (b.perfect) this.audio.tone(1040, 0.25, 'sine', 0.1, 0.03);
   }
 
   onKill() { /* drop is handled by Combat */ }
@@ -262,6 +280,7 @@ export class Game {
   // aiming at is weak to, if you carry it; otherwise whatever you hold most of.
   pickElement(origin, dir) {
     const inv = this.state.inv, seal = this.sealTarget();
+    if (this.forceEl && inv[this.forceEl] > 0) return this.forceEl;
     if (seal) {
       v1.copy(seal.pos).sub(origin);
       const t = v1.dot(dir);
@@ -324,7 +343,8 @@ export class Game {
   // What the on-screen buttons should show.
   uiState() {
     const el = this.castEl;
-    return { castCss: el ? ELEMENTS[el].css : null, castCount: el ? this.state.inv[el] : 0, weapon: this.time.current() };
+    return { castCss: el ? ELEMENTS[el].css : null, castCount: el ? this.state.inv[el] : 0, weapon: this.time.current(),
+      charge: this.chargeT < 0 ? 0 : Math.min(1, this.chargeT / CAST.W0), perfect: this.chargeT >= CAST.W0 && this.chargeT <= CAST.W1 };
   }
 
   // ------------------------------------------------------------------ frame
@@ -389,23 +409,52 @@ export class Game {
     const tHand = input.xr ? input.left : input.right;
     if (this.started && !this.transit && !this.dead && input.timeEdge) this.time.use(tHand);
     this.time.update(dt, time, headLocal);
-    combat.update(dt * ws, dt, time);
+    combat.update(dt * ws, dt, wt);
 
-    // ---- casting
+    // ---- casting: hold to charge, release to throw. Let go inside the short
+    // resonance window (the orb flashes white, a chime sounds) for a perfect cast.
     this.castCool -= dt;
     const origin = v1.copy(input.right.pos).add(player.pos).clone(), aim = input.right.dir;
     this.castEl = this.pickElement(origin, aim);
-    if (input.cast && this.castCool <= 0 && this.started && !this.transit && !this.dead) {
-      this.castCool = 0.3;
-      if (this.castEl) {
-        const el = this.castEl;
-        s.inv[el]--;
-        combat.castPlayer(origin, aim, el);
-        this.time.echoCast(el);
-        this.audio.tone(el === 'fire' ? 180 : el === 'water' ? 420 : 300, 0.2, 'triangle', 0.14, 0, 2.2);
-        input.pulse(input.right, 0.5, 40);
-        hud.poke(); this.save();
-      } else this.tell('empty', 6, 'No essence to cast', 'Gather some at a deposit: walk into the glowing orbs', 3);
+    const canCast = this.started && !this.transit && !this.dead;
+    if (!input.cast) this.castLock = false;
+    const release = () => {
+      const el = this.castEl || this.chargeEl, pw = this.castPower(this.chargeT);
+      this.chargeT = -1; this.castCool = 0.12;
+      if (!el || s.inv[el] <= 0) return;
+      s.inv[el]--;
+      combat.castPlayer(origin, aim, el, pw);
+      this.time.echoCast(el, pw);
+      this.lastCast = pw.label;
+      this.audio.tone(el === 'fire' ? 180 : el === 'water' ? 420 : 300, 0.2, 'triangle', pw.perfect ? 0.2 : 0.12, 0, pw.perfect ? 3 : 2.2);
+      input.pulse(input.right, pw.perfect ? 1 : 0.4, pw.perfect ? 90 : 40);
+      if (pw.perfect) this.tell('perfect', 10, 'Perfect cast', 'Faster, three times the force, and it punches through', 2, ELEMENTS[el].css);
+      else if (pw.label === 'overheld') this.tell('over', 12, 'Held too long', 'The charge sours after the flash. Release on it.', 2.5);
+      hud.poke(); this.save();
+    };
+    if (input.cast && canCast && !this.castLock) {
+      if (this.chargeT < 0) {
+        if (this.castCool <= 0) {
+          if (this.castEl) { this.chargeT = 0; this.chargeEl = this.castEl; }
+          else this.tell('empty', 6, 'No essence to cast', 'Gather some at a deposit: move into the glowing orbs', 3);
+        }
+      } else {
+        const before = this.chargeT;
+        this.chargeT += dt;
+        if (before < CAST.W0 && this.chargeT >= CAST.W0) { this.audio.tone(1320, 0.16, 'sine', 0.16); input.pulse(input.right, 0.8, 30); }
+        if (this.chargeT >= CAST.MAX) { release(); this.castLock = true; }
+      }
+    } else if (this.chargeT >= 0) { if (canCast) release(); else this.chargeT = -1; }
+    // the charge, gathered at your casting hand
+    const orb = this.chargeOrb;
+    orb.visible = this.chargeT >= 0;
+    if (orb.visible) {
+      const c = Math.min(1, this.chargeT / CAST.W0), inWin = this.chargeT >= CAST.W0 && this.chargeT <= CAST.W1, over = this.chargeT > CAST.W1;
+      const rgb = ELEMENTS[this.castEl || this.chargeEl].rgb, sc = input.xr ? 1 : 0.55;
+      orb.position.copy(input.right.pos).addScaledVector(aim, input.xr ? 0.16 : 0.1);
+      orb.scale.setScalar(sc * (inWin ? 0.085 + 0.012 * Math.sin(time * 40) : over ? 0.05 * (1 - (this.chargeT - CAST.W1) / (CAST.MAX - CAST.W1)) + 0.012 : 0.012 + 0.05 * c));
+      orb.material.uniforms.uColor.value.set(...(inWin ? [1, 1, 1] : over ? rgb.map((q) => q * 0.4) : rgb));
+      orb.material.uniforms.uGain.value = inWin ? 3 : 1.4;
     }
 
     // ---- health: hurt fades, and you mend if left alone a few seconds
@@ -513,6 +562,30 @@ export class Game {
         pm.sub = s.order.length > 2 ? (sign > 0 ? 'Onward' : 'Back') : 'Wormhole'; pm.aimed = false;
       }
       hud.setMarker(pm);
+    }
+
+    // ---- radar: where things lie around you, by bearing and (log) distance
+    if ((this.radarT -= dt) <= 0) {
+      this.radarT = 0.1;
+      const blips = [], onWorld = !inside && alt < def.radius * 0.5 && !this.transit;
+      if (onWorld) {
+        const up = player.up, f = this.camera.getWorldDirection(v2).addScaledVector(up, -v2.dot(up)).normalize().clone(), r = v2.crossVectors(f, up).clone();
+        const goal = obj.goal === id ? (obj.gather ? 'deposit' : 'well') : null;
+        const add = (local, kind, css, extra = {}) => {
+          v1.copy(local).sub(headLocal);
+          const x = v1.dot(r), y = v1.dot(f), d = Math.acos(Math.max(-1, Math.min(1, local.dot(headLocal) / (local.length() * headLocal.length())))) * def.radius;
+          blips.push({ a: Math.atan2(x, y), d, kind, css, goal: goal === kind, ...extra });
+        };
+        add(gate.site, 'well', ELEMENTS[def.element].css, { open: gate.open });
+        for (const d of field.deposits) add(d.pos, 'deposit', ELEMENTS[def.element].css, { buried: d.buried, spent: d.orbs.every((o) => o.state === 2) });
+        if (def.anomaly) { const a = this.time.anomaly(P); add(a.pos, 'anomaly', WEAPONS[a.weapon].css, { owned: this.time.has(a.weapon) }); }
+        for (const e of combat.enemies) if (e.state === 'chase' || e.state === 'pursue') add(v1.copy(e.pos).sub(P.pos).clone(), 'foe', '#ff5a4a');
+      }
+      // of the deposits, ring only the nearest one worth visiting
+      const deps = blips.filter((b) => b.kind === 'deposit' && b.goal);
+      const pickD = deps.filter((b) => !b.buried && !b.spent).sort((p, q) => p.d - q.d)[0];
+      for (const b of deps) b.goal = b === pickD;
+      hud.setRadar(onWorld ? blips : null);
     }
 
     hud.update(dt, {

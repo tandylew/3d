@@ -115,6 +115,8 @@ export class Planet {
       uCloudCS: { value: new THREE.Vector2(1, 0) },
       uSites: { value: Array.from({ length: 10 }, (_, i) => { const q = def.sites[i]; return q ? new THREE.Vector4(q.x, q.y, q.z, q.kind === 'anomaly' ? 0.7 : 1) : new THREE.Vector4(0, 1, 0, 0); }) },
       uShaft: { value: new THREE.Vector4(def.gate.x, def.gate.y, def.gate.z, 0) },
+      uTrailA: { value: Array.from({ length: 9 }, (_, i) => { const q = def.sites[i]; return q ? new THREE.Vector4(q.x, q.y, q.z, q.kind === 'anomaly' ? 2 : 1) : new THREE.Vector4(0, 1, 0, 0); }) },
+      uTrailN: { value: Array.from({ length: 9 }, (_, i) => { const q = def.sites[i]; return q ? new THREE.Vector3(q.x, q.y, q.z).cross(new THREE.Vector3(def.gate.x, def.gate.y, def.gate.z)).normalize() : new THREE.Vector3(0, 1, 0); }) },
       uCoreR: { value: CORE_R }, uChamber: { value: 0 },
       uCloudTint: { value: new THREE.Vector3(...C.tint) },
       uRockCol: { value: new THREE.Vector3(...L.rock.map((c) => Math.pow(c, 2.2))) },

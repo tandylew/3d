@@ -95,6 +95,8 @@ export class TouchControls {
     b.cast.style.setProperty('--c', s.castCss || '#8899aa');
     b.cast.classList.toggle('empty', !s.castCount);
     b.cast.dataset.n = s.castCount || '';
+    b.cast.style.setProperty('--p', Math.round(s.charge * 100) + '%');
+    b.cast.classList.toggle('perfect', !!s.perfect);
     b.time.hidden = b.cycle.hidden = !s.weapon;
     if (s.weapon) {
       b.time.textContent = s.weapon.short; b.time.style.setProperty('--c', s.weapon.css);

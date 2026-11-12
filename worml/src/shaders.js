@@ -68,15 +68,34 @@ export const terrainVS = /* glsl */ `
 attribute vec3 aColor;
 attribute vec3 aAux;
 attribute vec3 aDpos;
+uniform vec3 uCenter;
+uniform vec4 uShaft;
+uniform vec4 uTrailA[9];   // xyz: where a stream rises (a deposit or anomaly), w: 0 none, 1 essence, 2 time
+uniform vec3 uTrailN[9];   // normal of the great circle it follows to the wellhead
+uniform float uR;
 varying vec3 vColor;
 varying vec3 vAux;
 varying vec3 vDpos;
 varying vec3 vNormal;
 varying vec3 vWorld;
+varying vec3 vTrail;       // x: signed metres from the nearest stream, y: its kind, z: which stream
 void main() {
   vColor = aColor; vAux = aAux; vDpos = aDpos; vNormal = normal;
   vec4 w = modelMatrix * vec4(position, 1.0);
   vWorld = w.xyz;
+  // Streams of essence run from every deposit to the wellhead. The signed
+  // distance is found per vertex (cheap) and interpolated, so a stream stays
+  // unbroken even where the terrain mesh is coarse.
+  vec3 dir = normalize(w.xyz - uCenter);
+  float best = 1e9; vTrail = vec3(1e6, 0.0, 0.0);
+  for (int i = 0; i < 9; i++) {
+    if (uTrailA[i].w < 0.5) continue;
+    vec3 n = uTrailN[i];
+    float d = dot(dir, n) * uR;
+    float outside = max(max(-dot(cross(uTrailA[i].xyz, dir), n), -dot(cross(dir, uShaft.xyz), n)), 0.0) * uR;
+    float ad = abs(d) + outside;
+    if (ad < best) { best = ad; vTrail = vec3(d < 0.0 ? -ad : ad, uTrailA[i].w, float(i)); }
+  }
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
 
@@ -91,6 +110,7 @@ varying vec3 vAux;     // x: height above the liquid level / 40 m (clamped), y: 
 varying vec3 vDpos;
 varying vec3 vNormal;
 varying vec3 vWorld;
+varying vec3 vTrail;
 ${ATMO}
 ${CLOUD}
 void main() {
@@ -152,6 +172,17 @@ void main() {
   float foam = liq * smoothstep(-2.2, -0.1, shoreH + (dm.r - 0.5) * 2.0 + sin(uTime * 0.9 + dk.r * 20.0) * 0.5)
              * smoothstep(0.35, 0.75, df.r * 0.6 + dn.g * 0.6) * step(0.6, vAux.z) * (1.0 - uMetal);
 
+  // The stream: it meanders, widens with distance so it can be followed from
+  // the air (from orbit the streams are bright threads converging on the well),
+  // and darkens its banks.
+  float td = abs(vTrail.x + (dk.r - 0.5) * 70.0 + (dm.r - 0.5) * 9.0);
+  float tw = 1.3 + dist * 0.0045;
+  // (where neighbouring vertices belong to different streams the interpolated id is fractional: no stream there)
+  float sameStream = 1.0 - smoothstep(0.02, 0.06, abs(vTrail.z - floor(vTrail.z + 0.5)));
+  float stream = (1.0 - smoothstep(tw * 0.55, tw, td)) * sameStream;
+  float banks = (1.0 - smoothstep(tw, tw * 2.5 + 3.0, td)) * (1.0 - liq) * sameStream;
+  albedo *= 1.0 - 0.4 * banks;
+  wet = max(wet, banks * 0.8);
   float shine = max(vAux.z, wet * 0.5);
   vec3 N = normalize(mix(Ng, up, liq) + bump * mix(1.25, 0.3, liq));
   float sunE = dot(up, uSunDir);
@@ -187,6 +218,11 @@ void main() {
   float heat = vAux.y * mix(land, molten * 1.2 + 0.04, liq);
   col = mix(col, col * 0.3, liq * (1.0 - molten) * step(0.05, vAux.y));
   col += (uGlowColor + vec3(0.3, 0.22, 0.1) * heat * heat) * heat * mix(1.9, 2.4, liq) * mix(vec3(1.0), albedo * 2.5, 0.3);
+
+  vec3 streamCol = vTrail.y > 1.5 ? vec3(1.0, 0.86, 0.55) : uGlowColor;
+  float ripple = 0.65 + 0.35 * sin(uTime * 3.0 + dn.r * 22.0 + df.r * 9.0);
+  col = mix(col, col * 0.35, stream * 0.7);
+  col += streamCol * stream * ripple * (1.1 + 0.9 * smoothstep(200.0, 4000.0, dist));
 
   // Aerial perspective from the ground, limb haze from orbit.
   float mu = dot(-V, uSunDir);

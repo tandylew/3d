@@ -9,7 +9,7 @@
 // Each relic waits on a lone mesa where time already misbehaves in its own
 // way, which is how you spot the place from the air.
 import * as THREE from 'three';
-import { WEAPONS, WEAPON_ORDER, PLANET_BY_ID, groundHeight } from './worlds.js';
+import { WEAPONS, WEAPON_ORDER, PLANET_BY_ID, ELEMENTS, groundHeight } from './worlds.js';
 import { Builder, propMaterial, glowMaterial, additive, ENV } from './gfx.js';
 import { uvVS, pillarFS, beaconFS } from './shaders.js';
 import { treeGeometry } from './props.js';
@@ -21,6 +21,19 @@ const Y = new THREE.Vector3(0, 1, 0);
 const SHORT = { pearls: 'SLOW', rewinder: 'REWIND', seeds: 'GROW', mantle: 'FREEZE' };
 
 const PICKUPS = {
+  mainspring() {   // a wound coil in a toothed brass ring
+    const b = new Builder(), brass = [0.78, 0.6, 0.28];
+    b.add(new THREE.TorusGeometry(0.7, 0.09, 8, 36), brass, 0.15);
+    for (let i = 0; i < 16; i++) b.add(new THREE.BoxGeometry(0.1, 0.2, 0.14), brass, 0.15, Math.cos(i * 0.3927) * 0.82, Math.sin(i * 0.3927) * 0.82, 0, 1, 1, 1, 0, 0, i * 0.3927 - Math.PI / 2);
+    for (let i = 0; i < 4; i++) b.add(new THREE.TorusGeometry(0.14 + i * 0.13, 0.035, 6, 28), [1.0, 0.85, 0.5], 0.6, 0, 0, 0.03 * i);
+    return b.build();
+  },
+  prism() {        // a tall crystal that splits the light
+    const b = new Builder();
+    b.add(new THREE.OctahedronGeometry(0.55, 0), [0.75, 0.9, 1.0], 0.35, 0, 0, 0, 1, 1.9, 1, 0, 0, 0, true);
+    b.add(new THREE.OctahedronGeometry(0.3, 0), [1.0, 0.7, 0.9], 0.5, 0, 0, 0, 1, 2.6, 1, 0, 0.78, 0, true);
+    return b.build();
+  },
   pearls() {   // an open shell holding three pearls
     const b = new Builder(), nacre = [0.82, 0.78, 0.72];
     b.blob(1.0, nacre, 0, 0, -0.1, 0, { detail: 2, rough: 0.18, sy: 0.3, seed: 1, color2: [0.7, 0.62, 0.66], ridged: true });
@@ -79,7 +92,7 @@ export class Timeworks {
     this.pearls = { n: 3, max: 3, t: 0, every: 22 };
     this.seeds = { n: 2, max: 2, t: 0, every: 16 };
     this.cool = { rewinder: 0, mantle: 0 };
-    this.slowT = 0; this.freezeT = 0; this.echo = null;
+    this.slowT = 0; this.freezeT = 0; this.echo = null; this.slowLen = 6; this.freezeLen = 5; this.coolK = 1;
     this.anoms = new Map(); this.blooms = []; this.grenades = [];
     this.rnd = mulberry32(99); this.hinted = {};
     // Rewinder beam
@@ -105,6 +118,14 @@ export class Timeworks {
   }
 
   get owned() { return this.game.state.weapons; }
+  // Passive relics change the numbers the others run on.
+  tune() {
+    const o = this.owned, fast = o.mainspring ? 0.5 : 1, deep = !!o.prism;
+    this.pearls.every = 22 * fast; this.seeds.every = 16 * fast;
+    this.pearls.max = deep ? 4 : 3; this.seeds.max = deep ? 3 : 2;
+    this.slowLen = deep ? 9 : 6; this.freezeLen = deep ? 7.5 : 5; this.coolK = fast;
+  }
+
   get worldScale() { return this.freezeT > 0 ? 0 : this.slowT > 0 ? 0.2 : 1; }
 
   // Dev dashboard: every count full, every cooldown clear.
@@ -138,10 +159,10 @@ export class Timeworks {
   give(id) {
     const s = this.game.state;
     if (s.weapons[id]) return;
-    s.weapons[id] = true; s.sel = id;
+    s.weapons[id] = true; if (!WEAPONS[id].passive) s.sel = id;
     const w = WEAPONS[id], L = this.game.labels();
     this.game.hud.say(`${w.name} acquired`, w.lore, 7, w.css);
-    this.game.hud.say(`${w.verb}: ${L.time}`, this.list().length > 1 ? `Switch relics with ${L.cycle}` : `A relic of ${PLANET_BY_ID[w.world].name}`, 6, w.css);
+    if (!w.passive) this.game.hud.say(`${w.verb}: ${L.time}`, this.list().length > 1 ? `Switch relics with ${L.cycle}` : `A relic of ${PLANET_BY_ID[w.world].name}`, 6, w.css);
     this.game.audio.relic?.();
     this.game.save();
   }
@@ -154,29 +175,21 @@ export class Timeworks {
     if (!c.ready) { au.tone(110, 0.15, 'square', 0.06); return false; }
     const origin = v1.copy(hand.pos).add(g.player.pos).clone(), dir = hand.dir.clone().normalize();
     if (c.id === 'pearls') {
-      this.pearls.n--; this.slowT = 6;
+      this.pearls.n--; this.slowT = this.slowLen;
       au.tone(660, 1.2, 'sine', 0.16, 0, 0.25); au.sweep(1.2, 2400, 200, 0.25);
     } else if (c.id === 'mantle') {
       if (this.echo) { this.recall(); return true; }
       this.echo = { pos: g.player.pos.clone(), quat: g.rig.quaternion.clone(), t: 15, inside: g.player.inside };
-      this.freezeT = 5; this.cool.mantle = 32;
+      this.freezeT = this.freezeLen; this.cool.mantle = 32 * this.coolK;
       au.tone(880, 0.9, 'triangle', 0.14); au.tone(1320, 1.4, 'sine', 0.1, 0.05);
       g.hud.say('Time is held', `Your echo stands here. ${g.labels().time} again to step back into it`, 5, WEAPONS.mantle.css);
     } else if (c.id === 'rewinder') {
-      this.cool.rewinder = 2.6;
+      this.cool.rewinder = 2.6 * this.coolK;
       let end = 300, did = false;
       const pick = g.combat.rayPick(origin, dir, 320);
       if (pick) { g.combat.rewind(pick.enemy); end = pick.t; did = true; }
-      const P = g.player.planet, field = g.fields.get(P.def.id);
-      for (const d of field.deposits) {
-        if (!d.buried) continue;
-        v2.copy(P.pos).add(d.pos).sub(origin);
-        const t = v2.dot(dir);
-        if (t > 0 && t < 420 && v2.addScaledVector(dir, -t).length() < 24 && field.unbury(d)) {
-          g.state.unburied[P.def.id][d.index] = true; g.save(); did = true; end = Math.min(end, t);
-          g.hud.say('The collapse un-falls', 'Stone lifts back to where it was', 4, WEAPONS.rewinder.css);
-        }
-      }
+      // eruptions about to happen along the beam un-happen
+      if (g.trials.undoNear(origin, dir, 200)) { did = true; g.hud.say('Un-happened', 'The eruption folds back into the ground', 2, WEAPONS.rewinder.css); }
       this.beamFrom = origin; this.beamDir = dir; this.beamLen = end; this.beamT = 0.45;
       au.sweep(0.5, 4000, 300, 0.35); au.tone(520, 0.4, 'sawtooth', 0.08, 0, 0.4);
       if (!did) g.hud.say('Nothing there to undo', '', 1.5);
@@ -213,10 +226,13 @@ export class Timeworks {
     mesh.position.copy(local); mesh.quaternion.setFromUnitVectors(Y, up); mesh.scale.setScalar(0.001);
     planet.group.add(mesh);
     this.blooms.push({ planet, local: local.clone(), mesh, t: 0 });
-    const g = this.game, n = g.fields.get(planet.def.id).regrow(local, 40);
+    // grown beside a woken font, the tree fruits with its element
+    const g = this.game, f = g.fields.get(planet.def.id), el = planet.def.element;
+    const n = f.attuned && f.site.pos.distanceTo(local) < 60 ? Math.min(4, g.cap - g.state.inv[el]) : 0;
+    if (n) g.gain(el, n);
     g.combat.spark(v1.copy(planet.pos).add(local).addScaledVector(up, 2), WEAPONS.seeds.rgb, 16, 14);
     g.audio.sweep(1.4, 200, 2600, 0.3); g.audio.tone(196, 1.2, 'triangle', 0.12, 0, 2);
-    if (n) g.hud.say('A season passes in a breath', `${n} essence regrown`, 3, WEAPONS.seeds.css);
+    if (n) g.hud.say('A season passes in a breath', `The tree fruits: ${n} ${ELEMENTS[el].label}`, 3, WEAPONS.seeds.css);
   }
 
   // ------------------------------------------------------------ anomalies
@@ -286,6 +302,16 @@ export class Timeworks {
         const ang = s[0] * TAU + time * (2.5 + s[3] * 3), r = 3 + s[2] * 10;
         v1.set(Math.cos(ang) * r, 0.8 + s[1] * 9 + Math.sin(time * 6 + i) * 0.4, Math.sin(ang) * r);
         sv.setScalar(sc * (0.6 + 0.6 * Math.sin(time * 9 + i)));
+      } else if (a.weapon === 'mainspring') {
+        // ore circling in jerks, like the teeth of an escapement
+        const tick = Math.floor(time * 2.5), ring = i % 3, ang = s[0] * TAU + tick * (0.13 + ring * 0.05) * (ring % 2 ? -1 : 1);
+        v1.set(Math.cos(ang) * (4 + ring * 4), 1.5 + ring * 2.5 + s[1], Math.sin(ang) * (4 + ring * 4));
+        sv.setScalar(sc * 1.6);
+      } else if (a.weapon === 'prism') {
+        // motes in mirrored pairs: each one's twin is where it was
+        const ang = s[0] * TAU + time * 0.5 * (i % 2 ? 1 : -1), r = 3 + s[2] * 10, y = 1 + s[1] * 10;
+        v1.set(Math.cos(ang) * r * (i % 2 ? 1 : -1), y, Math.sin(ang) * r);
+        sv.setScalar(sc * (1 + 0.5 * Math.sin(time * 2 + i)));
       } else {
         // dust and stones hung in the air; once in a while the whole storm ticks forward one instant
         const tick = Math.floor(time / 5), k = (s[1] + tick * 0.037 * (i % 5 + 1)) % 1, ang = s[0] * TAU + tick * 0.21;
@@ -303,6 +329,7 @@ export class Timeworks {
   // ---------------------------------------------------------------- frame
   update(raw, time, headLocal) {
     const g = this.game, pl = g.player, P = pl.planet;
+    this.tune();
     for (const c of [this.pearls, this.seeds]) if (c.n < c.max && (c.t += raw) >= c.every) { c.t = 0; c.n++; }
     this.cool.rewinder -= raw; this.cool.mantle -= raw;
     if (this.slowT > 0 && (this.slowT -= raw) <= 0) g.audio.tone(330, 0.6, 'sine', 0.1, 0, 2);

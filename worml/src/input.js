@@ -33,7 +33,15 @@ export class Input {
     this.yaw = 0; this.pitch = 0;
     this.mouseGrip = false;
     // Touch state, written by touch.js (virtual stick + on-screen buttons).
-    this.touch = { on: false, move: new THREE.Vector2(), look: new THREE.Vector2(), cast: 0, time: false, cycle: false, jump: false, hud: false };
+    this.touch = { on: false, move: new THREE.Vector2(), look: new THREE.Vector2(), cast: 0, time: false, cycle: false, jump: false, hud: false,
+      combat: false,      // set by the game: is there something to attack? Then the open screen takes gestures instead of look-drags.
+      gestures: [],       // { type: 'tap' | 'hold' | 'swipe', x, y (NDC), dx, dy, t, path }
+      holdT: -1, holdX: 0, holdY: 0 };
+    // Attacks this frame, whatever device made them:
+    this.slashes = [];    // { pos (scene), dir, sweep, power }   melee sweeps (swing a controller, swipe the screen, V)
+    this.shots = [];      // { ndc: [x, y], t }                   aimed casts from screen taps / holds
+    this.aimNdc = null;   // while a finger is charging a cast, where it is
+    this._hand = { left: { p: new THREE.Vector3(), v: new THREE.Vector3(), cool: 0, has: false }, right: { p: new THREE.Vector3(), v: new THREE.Vector3(), cool: 0, has: false } };
     // Actions (edges are true for one frame)
     this.flyMode = false;                 // flat screens: stick/W flies where you look, and you hover
     this.cast = false;                    // elemental power, held
@@ -98,7 +106,7 @@ export class Input {
   frame(dt = 1 / 60) {
     this.turnEdge = 0; this.actEdge = false;
     this.timeEdge = this.cycleEdge = this.jumpEdge = this.hudEdge = this.flyEdge = false; this.cast = false; this.select = -1;
-    this.move.set(0, 0); this.lift = 0;
+    this.move.set(0, 0); this.lift = 0; this.slashes.length = 0; this.shots.length = 0; this.aimNdc = null; this._dt = dt;
     for (const h of [this.left, this.right]) { h.trigger = 0; h.grip = 0; h.active = false; h.pad = null; }
     const session = this.renderer.xr.getSession();
     this.xr = !!session && this.renderer.xr.isPresenting;
@@ -111,6 +119,7 @@ export class Input {
       if (d.move) this.move.copy(d.move);
       if (d.lift !== undefined) this.lift = d.lift;
       if (d.cast) this.cast = true;
+      if (d.slash) { this.slashes.push(d.slash); d.slash = null; }
       if (d.time) { this.timeEdge = true; d.time = false; }
       if (d.jump) { this.jumpEdge = true; d.jump = false; }
       if (d.cycle) { this.cycleEdge = true; d.cycle = false; }
@@ -133,6 +142,21 @@ export class Input {
       h.grip = gp.buttons[1]?.value || 0;
       c.ray.getWorldPosition(h.pos);
       h.dir.set(0, 0, -1).applyQuaternion(c.ray.getWorldQuaternion(new THREE.Quaternion()));
+      // Melee: swing the controller hard and its path becomes a blade.
+      const hv = this._hand[src.handedness], lp = c.ray.position;      // rig space, so flying doesn't count as swinging
+      if (hv.has && this._dt > 0) {
+        hv.v.lerp(new THREE.Vector3().subVectors(lp, hv.p).divideScalar(this._dt), 0.5);
+        hv.cool -= this._dt;
+        const sp = hv.v.length();
+        if (sp > 2.3 && hv.cool <= 0 && h.trigger < 0.3) {
+          hv.cool = 0.4;
+          const sweep = hv.v.clone().applyQuaternion(this.rig.quaternion).normalize();
+          const fwd = h.dir.clone().addScaledVector(sweep, -h.dir.dot(sweep));
+          if (fwd.lengthSq() < 0.04) this.camera.getWorldDirection(fwd).addScaledVector(sweep, -fwd.dot(sweep));
+          this.slashes.push({ pos: h.pos.clone(), dir: fwd.normalize(), sweep, power: Math.min(1, (sp - 2.3) / 2.5), hand: h });
+        }
+      }
+      hv.p.copy(lp); hv.has = true;
       const ax = gp.axes.length >= 4 ? gp.axes[2] : gp.axes[0] || 0;
       const ay = gp.axes.length >= 4 ? gp.axes[3] : gp.axes[1] || 0;
       if (left) {
@@ -181,10 +205,21 @@ export class Input {
       else if (code === 'KeyE' || code === 'Mouse2') this.timeEdge = true;
       else if (code === 'KeyQ') this.cycleEdge = true;
       else if (code === 'KeyH' || code === 'Tab') this.hudEdge = true;
+      else if (code === 'KeyV' || code === 'Mouse1') this.slashes.push({ pos: h.pos.clone(), dir: h.dir.clone(), sweep: new THREE.Vector3(1, 0.25 * (Math.random() - 0.5), 0).applyQuaternion(cam.getWorldQuaternion(new THREE.Quaternion())).normalize(), power: 0.7 });
       else if (/^Digit[1-4]$/.test(code)) this.select = Number(code[5]) - 1;
     }
     if (this._wheel) this.cycleEdge = true;
     if (t.on) {
+      // screen gestures: a swipe is a blade across the view, a tap or a held press is a cast at that point
+      for (const ge of t.gestures) {
+        if (ge.type === 'swipe') {
+          const q = cam.getWorldQuaternion(new THREE.Quaternion());
+          const mid = new THREE.Vector3(ge.x + ge.dx / 2, ge.y + ge.dy / 2, 0.5).unproject(cam);
+          this.slashes.push({ pos: h.pos.clone(), dir: mid.sub(cam.getWorldPosition(new THREE.Vector3())).normalize(), sweep: new THREE.Vector3(ge.dx * cam.aspect, ge.dy, 0).normalize().applyQuaternion(q), power: ge.power, ndc: ge });
+        } else this.shots.push({ ndc: [ge.x, ge.y], t: ge.type === 'hold' ? ge.t : 0 });
+      }
+      t.gestures.length = 0;
+      if (t.holdT >= 0) this.aimNdc = [t.holdX, t.holdY];
       if (t.time) { this.timeEdge = true; t.time = false; }
       if (t.cycle) { this.cycleEdge = true; t.cycle = false; }
       if (t.jump) { this.jumpEdge = true; t.jump = false; }

@@ -3,7 +3,7 @@ import { Input } from './input.js';
 import { Audio } from './audio.js';
 import { Game, SAVE_KEY } from './game.js';
 import { TouchControls } from './touch.js';
-import { groundHeight } from './worlds.js';
+import { groundHeight, terrainRaw } from './worlds.js';
 import { Dev } from './dev.js';
 
 const $ = (id) => document.getElementById(id);
@@ -157,7 +157,7 @@ renderer.setAnimationLoop(() => {
   dev.update(dt);
   game.frame(dt, time);
   if (playing) quality.frame(dt);
-  if (touch.enabled) touch.sync(game.uiState());
+  if (touch.enabled) touch.sync(game.uiState(), dt);
   renderer.render(scene, camera);
 
   if (!ready) {
@@ -175,4 +175,4 @@ renderer.setAnimationLoop(() => {
 });
 
 // Handy for debugging and automated tests.
-window.worml = { game, input, renderer, scene, camera, rig, THREE, dev, touch, quality, groundHeight, get ready() { return ready; } };
+window.worml = { game, input, renderer, scene, camera, rig, THREE, dev, touch, quality, groundHeight, terrainRaw, get ready() { return ready; } };

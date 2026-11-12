@@ -123,35 +123,43 @@ export class Combat {
   }
 
   // ------------------------------------------------------------ population
-  // Called when the nearest world changes. Guards of the old world go home
-  // unless they are already after you; the new world's guards take up posts.
+  // Called when the nearest world changes: whatever was not already after you is left behind.
   setPlanet(planet) {
-    this.enemies = this.enemies.filter((e) => e.state === 'pursue' || e.state === 'chase' || e.state === 'rewind');
-    for (const e of this.enemies) e.foreign = e.planet !== planet;
+    this.enemies = this.enemies.filter((e) => e.space || e.state === 'pursue' || e.state === 'chase' || e.state === 'rewind');
+    for (const e of this.enemies) e.foreign = !e.space && e.planet !== planet;
     this.planet = planet;
-    if (!planet) return;
-    const def = planet.def, st = STATS[def.element], field = this.game.fields.get(def.id);
-    for (const d of field.deposits) {
-      for (let k = 0; k < st.n; k++) {
-        if (this.enemies.some((e) => e.planet === planet && e.dep === d.index && e.slot === k)) continue;
-        const e = {
-          id: this.nextId++, el: def.element, planet, dep: d.index, slot: k, nest: d.pos.clone(), st,
-          pos: new THREE.Vector3(), vel: new THREE.Vector3(), fwd: new THREE.Vector3(1, 0, 0), head: new THREE.Vector3(),
-          hp: st.hp, max: st.hp, dmg: st.dmg, aggro: st.aggro, striker: k % 2 === 0,
-          state: 'idle', act: 'run', actT: 0, air: false, h: BODY_H, vy: 0, pitch: 0,
-          cool: 1 + this.rnd() * 2, cool2: 2 + this.rnd() * 3, dodgeCool: 0, phase: (k / st.n) * TAU + d.index, hist: [], histT: 0,
-          stun: 0, root: 0, burn: 0, slow: 0, pacify: 0, flash: 0, foreign: false, rew: 0, dead: 0, age: 0, near: false,
-          legs: Array.from({ length: st.legs }, (_, i) => ({ side: i % 2 ? 1 : -1, fz: (Math.floor(i / 2) / Math.max(1, st.legs / 2 - 1) - 0.5) * 1.5, foot: new THREE.Vector3(), from: new THREE.Vector3(), t: 1, set: false })),
-        };
-        this.post(e, 0, false);
-        this.enemies.push(e);
-      }
-    }
   }
+
+  // Bring a guardian into the world. o: { planet, pos (solar), el, emerge, tag, striker, hp, dmg, sz, space, boss }
+  // With `emerge` it rises out of its element (the ground, the pool, the flare) before it attacks.
+  spawn(o) {
+    const st = STATS[o.el], sz = o.sz || 1;
+    const e = {
+      id: this.nextId++, el: o.el, planet: o.planet, st, tag: o.tag || '', space: !!o.space, boss: !!o.boss, sz,
+      nest: o.pos.clone().sub(o.planet.pos),
+      pos: o.pos.clone(), vel: new THREE.Vector3(), fwd: new THREE.Vector3(1, 0, 0), head: o.pos.clone(),
+      hp: o.hp || st.hp, max: o.hp || st.hp, dmg: o.dmg || st.dmg, aggro: 200, striker: o.striker ?? this.rnd() < 0.5,
+      state: o.emerge ? 'emerge' : 'chase', em: 0, act: 'run', actT: 0, air: !!o.space, h: o.emerge && !o.space ? -2.4 * sz : BODY_H * sz, vy: 0, pitch: 0,
+      cool: 1 + this.rnd() * 2, cool2: 1.5 + this.rnd() * 3, dodgeCool: 0, phase: this.rnd() * TAU, hist: [], histT: 0,
+      stun: 0, root: 0, burn: 0, slow: 0, pacify: 0, flash: 0, foreign: false, rew: 0, dead: 0, age: 0, near: true,
+      legs: Array.from({ length: st.legs }, (_, i) => ({ side: i % 2 ? 1 : -1, fz: (Math.floor(i / 2) / Math.max(1, st.legs / 2 - 1) - 0.5) * 1.5 * sz, foot: new THREE.Vector3(), from: new THREE.Vector3(), t: 1, set: false })),
+    };
+    v1.copy(this.game.headSolar).sub(e.pos); UPV.copy(e.pos).sub(o.planet.pos).normalize();
+    if (!o.space) v1.addScaledVector(UPV, -v1.dot(UPV));
+    if (v1.lengthSq() > 1e-6) e.fwd.copy(v1.normalize());
+    this.enemies.push(e);
+    return e;
+  }
+
+  statsFor(el) { this.parts(el); return STATS[el]; }
+
+  // Remove every guardian matching fn (a trial abandoned, a wave dismissed).
+  clear(fn) { this.enemies = this.enemies.filter((e) => !fn(e)); }
 
   // An idle guardian patrols a ring round its deposit. With `walk` it is set
   // down on the actual ground; far-off posts skip that cost.
   post(e, time, walk) {
+    if (e.space) return;
     const a = e.phase + time * 0.11, r = 17 + (e.slot % 3) * 6;
     const up = v3.copy(e.nest).normalize();
     v1.set(-up.y, up.x, 0); if (v1.lengthSq() < 0.01) v1.set(0, -up.z, up.y); v1.normalize();
@@ -170,7 +178,7 @@ export class Combat {
   // Wormholes shake pursuit: strangers vanish, locals drift back to their posts.
   dropPursuit() {
     this.enemies = this.enemies.filter((e) => !e.foreign);
-    for (const e of this.enemies) if (e.state !== 'idle' && e.state !== 'dead') { e.state = 'idle'; e.pacify = 6; this.post(e, 0, false); for (const l of e.legs) l.set = false; }
+    for (const e of this.enemies) if (e.state !== 'idle' && e.state !== 'dead' && e.state !== 'emerge' && !e.space) { e.state = 'idle'; e.pacify = 6; this.post(e, 0, false); for (const l of e.legs) l.set = false; }
     this.bolts.length = 0;
   }
 
@@ -183,6 +191,16 @@ export class Combat {
     const rgb = power.perfect ? ELEMENTS[el].rgb.map((c) => c * 0.6 + 0.4) : ELEMENTS[el].rgb;
     this.bolts.push({ pos: origin.clone(), vel: dir.clone().multiplyScalar(power.speed || 120).add(this.game.player.vel), life: 2.4, from: 'player', el, rgb,
       size: power.size || 0.36, dmg: power.dmg || 24, perfect: !!power.perfect, echo: fromEcho, warned: false });
+  }
+
+  // A melee sweep: a blade of light `half` metres either side of its centre,
+  // travelling a short way forward. It is free to throw and hits everything it crosses once.
+  slash(origin, dir, sweep, el, power = 0.6, perfect = false) {
+    const rgb = el ? ELEMENTS[el].rgb : [0.85, 0.9, 1.0];
+    this.bolts.push({ pos: origin.clone().addScaledVector(dir, 1.2), vel: dir.clone().multiplyScalar(34).add(this.game.player.vel), life: 0.42 + power * 0.1, from: 'slash', el, rgb,
+      sweep: sweep.clone().normalize(), half: 2.2 + power * 1.6, size: 0.3, dmg: (16 + 22 * power) * (perfect ? 1.7 : 1), perfect, hits: new Set() });
+    this.slashCount = (this.slashCount || 0) + 1;
+    this.game.audio.sweep(0.22, 2600, 500, 0.22);
   }
 
   spark(pos, rgb, n = 6, speed = 9) {
@@ -253,8 +271,24 @@ export class Combat {
       if (e.state === 'dead') { e.dead -= raw; continue; }
       const dist = e.pos.distanceTo(target);
       e.near = dist < 420;
+      if (e.state === 'emerge') {
+        // rising out of the ground, the pool, the flare: sparks of its element, then it is on you
+        e.em += dt / 1.1;
+        const k = Math.min(1, e.em), sz = e.sz;
+        if (e.space) { e.h = BODY_H * sz; }
+        else {
+          UPV.copy(e.pos).sub(e.planet.pos).normalize();
+          e.h = (-2.4 + (BODY_H + 2.4) * k * k * (3 - 2 * k)) * sz;
+          e.pos.copy(e.planet.pos).addScaledVector(UPV, e.planet.def.radius + groundHeight(e.planet.def, UPV.x, UPV.y, UPV.z) + e.h);
+        }
+        if (dt > 0 && this.rnd() < 0.5) this.spark(v1.copy(e.pos).addScaledVector(UPV, -Math.max(0, e.h)), ELEMENTS[e.el].rgb, 2, 7);
+        if (e.em >= 1) { e.state = 'chase'; e.act = 'run'; g.audio.tone(120, 0.3, 'sawtooth', 0.08, 0, 2.5); }
+        this.legs(e, dt, wt);
+        continue;
+      }
       if (e.state === 'idle') {
         if (e.pacify > 0) e.pacify -= dt;
+        if (e.space) { if (e.pacify <= 0 && !g.dead) e.state = 'chase'; this.legs(e, dt, wt); continue; }
         if (!e.near) { if (!e.foreign) this.post(e, wt, false); for (const l of e.legs) l.set = false; continue; }
         // walk the patrol ring
         v2.copy(e.pos); this.post(e, wt, true); v1.copy(e.pos).sub(v2);
@@ -282,7 +316,7 @@ export class Combat {
       e.histT -= dt;
       if (e.histT <= 0) { e.histT = 0.2; e.hist.push(e.pos.clone()); if (e.hist.length > 70) e.hist.shift(); }
       if (g.dead || (pl.inside && e.state === 'chase' && dist > 60)) { e.state = 'idle'; e.pacify = 8; if (e.foreign) { e.state = 'dead'; e.dead = 0; } continue; }
-      const far = dist > 150;
+      const far = dist > 150 && !e.space;
       if (e.state === 'chase' && far) {
         if (pursuers < MAX_PURSUERS) { e.state = 'pursue'; pursuers++; g.onPursue(e); }
         else { e.state = 'idle'; e.pacify = 10; if (e.foreign) { e.state = 'dead'; e.dead = 0; } continue; }
@@ -296,9 +330,9 @@ export class Combat {
       const groundR = alt < 500 ? near.def.radius + groundHeight(near.def, UPV.x, UPV.y, UPV.z) : -1e9;
       const above = er - groundR;                        // its own height over the ground
       const mob = (e.slow > 0 ? 0.4 : 1) * (e.stun > 0 || e.root > 0 ? 0 : 1);
-      const wantAir = e.state === 'pursue' || tAlt > 7 || above > 40;
+      const wantAir = e.space || e.state === 'pursue' || tAlt > 14 || above > 40;
       if (wantAir) { e.air = true; if (e.act !== 'windup') e.act = 'run'; }
-      else if (e.air && above < BODY_H + 1.5) { e.air = false; e.h = Math.max(BODY_H, above); e.vy = 0; }   // touch down
+      else if (e.air && above < BODY_H * e.sz + 1.5) { e.air = false; e.h = Math.max(BODY_H * e.sz, above); e.vy = 0; }   // touch down
 
       v1.copy(target).sub(e.pos);
       if (e.air) {
@@ -306,7 +340,8 @@ export class Combat {
         if (e.state === 'chase') {
           const a = e.phase + wt * 0.35;
           v2.set(-UPV.y, UPV.x, 0); if (v2.lengthSq() < 0.01) v2.set(0, -UPV.z, UPV.y); v2.normalize();
-          v1.addScaledVector(v2, Math.cos(a) * 13).addScaledVector(v3.crossVectors(UPV, v2), Math.sin(a) * 13).addScaledVector(UPV, 3.5);
+          const ring = e.boss ? 34 : 13;
+          v1.addScaledVector(v2, Math.cos(a) * ring).addScaledVector(v3.crossVectors(UPV, v2), Math.sin(a) * ring).addScaledVector(UPV, e.boss ? 10 : 3.5);
         }
         const d = v1.length();
         const speed = (e.state === 'chase' ? Math.min(17, d * 1.5) : Math.min(22 + 0.72 * Math.max(0, alt), d * 1.2 + 12)) * mob;
@@ -325,7 +360,7 @@ export class Combat {
         e.fwd.lerp(v1, Math.min(1, dt * 5)).normalize();
         e.pitch += (0 - e.pitch) * Math.min(1, dt * 6);
         if (e.act === 'windup') { e.actT -= dt; if (e.actT <= 0) { this.spit(e, target); e.act = 'run'; } }
-        else if (e.state === 'chase' && dist < 55 && e.cool <= 0 && e.stun <= 0) this.setAct(e, 'windup', 0.5);
+        else if (e.state === 'chase' && dist < (e.boss ? 160 : 55) && e.cool <= 0 && e.stun <= 0) this.setAct(e, 'windup', 0.5);
       } else {
         // ---- on the ground: run, strafe, crouch, pounce, rear up, sidestep
         v1.addScaledVector(UPV, -v1.dot(UPV));              // flat direction to the target
@@ -350,7 +385,7 @@ export class Combat {
           want = null;
           e.vy -= 24 * dt; e.h += e.vy * dt;
           if (!e.hit && dist < 2.4) { e.hit = true; if (!g.decoyActive()) g.hurt(Math.round(e.dmg * 1.6)); this.spark(e.pos, ELEMENTS[e.el].rgb, 6); }
-          if (e.h <= BODY_H && e.vy < 0) { e.h = BODY_H; e.vy = 0; e.cool2 = 3 + this.rnd() * 2.5; this.setAct(e, 'recover', 0.55); e.vel.multiplyScalar(0.2); }
+          if (e.h <= BODY_H * e.sz && e.vy < 0) { e.h = BODY_H * e.sz; e.vy = 0; e.cool2 = 3 + this.rnd() * 2.5; this.setAct(e, 'recover', 0.55); e.vel.multiplyScalar(0.2); }
         } else if (e.act === 'windup') {
           if (e.actT <= 0) { this.spit(e, target); this.setAct(e, 'recover', 0.3); }
         } else if (e.act === 'dodge') {
@@ -364,7 +399,7 @@ export class Combat {
         }
         e.pos.addScaledVector(e.vel, dt);
         // ride height: low in a crouch, reared when winding up
-        if (e.act !== 'pounce') e.h += ((e.act === 'crouch' ? 0.75 : e.act === 'recover' ? 1.1 : BODY_H) - e.h) * Math.min(1, dt * 12);
+        if (e.act !== 'pounce') e.h += ((e.act === 'crouch' ? 0.75 : e.act === 'recover' ? 1.1 : BODY_H) * e.sz - e.h) * Math.min(1, dt * 12);
         e.pitch += ((e.act === 'windup' ? 0.6 : e.act === 'crouch' ? -0.25 : e.act === 'pounce' ? 0.3 : 0) - e.pitch) * Math.min(1, dt * 10);
         UPV.copy(e.pos).sub(near.pos).normalize();
         e.pos.copy(near.pos).addScaledVector(UPV, near.def.radius + groundHeight(near.def, UPV.x, UPV.y, UPV.z) + e.h);
@@ -385,6 +420,22 @@ export class Combat {
       v1.copy(b.pos);
       b.pos.addScaledVector(b.vel, step);
       if (b.from === 'fx' || b.life <= 0) continue;
+      if (b.from === 'slash') {
+        for (const e of this.enemies) {
+          if (e.state === 'dead' || e.state === 'rewind' || b.hits.has(e.id)) continue;
+          // distance from the guardian to the blade (a segment through the bolt along its sweep)
+          v3.copy(e.pos).sub(b.pos);
+          const t = Math.max(-b.half, Math.min(b.half, v3.dot(b.sweep)));
+          if (v3.addScaledVector(b.sweep, -t).length() < 2.0 * e.sz + 0.6) {
+            b.hits.add(e.id);
+            const mult = this.damage(e, b.dmg, b.el, false);
+            this.spark(e.pos, b.rgb, 6);
+            g.onHit(e, mult, false, b);
+          }
+        }
+        if (seal && !b.sealed && b.pos.distanceTo(seal.pos) < seal.r) { b.sealed = true; this.spark(b.pos, b.rgb, 6, 10); g.hitSeal(b.el, false, true); }
+        continue;
+      }
       if (b.from === 'player') {
         v2.copy(b.pos).sub(v1); const L = v2.length() || 1; v2.divideScalar(L);
         for (const e of this.enemies) {
@@ -404,8 +455,8 @@ export class Combat {
           }
           const t = Math.max(0, Math.min(L, along));
           v3.copy(v1).addScaledVector(v2, t);
-          const eye = v3.distanceTo(e.head) < 0.8 + b.size;
-          if (eye || v3.distanceTo(e.pos) < 1.5 + b.size) {
+          const eye = v3.distanceTo(e.head) < 0.8 * e.sz + b.size;
+          if (eye || v3.distanceTo(e.pos) < 1.5 * e.sz + b.size) {
             const mult = this.damage(e, b.dmg, b.el, eye);
             this.spark(b.pos, b.rgb, mult > 1.5 ? 10 : 5);
             g.onHit(e, mult, eye, b);
@@ -442,10 +493,15 @@ export class Combat {
   }
 
   spit(e, target) {
-    e.cool = 2.2 + this.rnd() * 1.4;
+    e.cool = (e.boss ? 1.5 : 2.2) + this.rnd() * 1.4;
     v1.copy(target).sub(e.head).normalize();
-    this.bolts.push({ pos: e.head.clone().addScaledVector(v1, 0.6), vel: v1.clone().multiplyScalar(34), life: 3, from: 'enemy', el: e.el, rgb: ELEMENTS[e.el].rgb, size: 0.34, dmg: e.dmg });
-    this.game.audio.tone(320, 0.18, 'square', 0.05, 0, 0.5);
+    const n = e.boss ? 5 : 1;
+    for (let i = 0; i < n; i++) {
+      v2.copy(v1);
+      if (n > 1) v2.add(v3.set(this.rnd() - 0.5, this.rnd() - 0.5, this.rnd() - 0.5).multiplyScalar(0.28)).normalize();
+      this.bolts.push({ pos: e.head.clone().addScaledVector(v2, 0.6 * e.sz), vel: v2.clone().multiplyScalar(e.boss ? 46 : 34), life: e.boss ? 5 : 3, from: 'enemy', el: e.el, rgb: ELEMENTS[e.el].rgb, size: e.boss ? 0.6 : 0.34, dmg: e.dmg });
+    }
+    this.game.audio.tone(e.boss ? 160 : 320, 0.18, 'square', 0.05, 0, 0.5);
   }
 
   // Feet: each leg keeps its foot planted until the body has moved on, then
@@ -455,25 +511,25 @@ export class Combat {
     UPV.copy(e.pos).sub((e.foreign && this.planet ? this.planet : e.planet).pos).normalize();
     F.copy(e.fwd); Rv.crossVectors(UPV, F).normalize();
     const flying = e.air || e.act === 'pounce';
-    const sp = e.vel.length(), stride = 0.75 + Math.min(1.1, sp * 0.07), swing = Math.max(0.09, 0.2 - sp * 0.006);
+    const sz = e.sz, sp = e.vel.length(), stride = (0.75 + Math.min(1.1, sp * 0.07)) * sz, swing = Math.max(0.09, 0.2 - sp * 0.006);
     let busy = [0, 0];
     for (let i = 0; i < e.legs.length; i++) if (e.legs[i].t < 1) busy[(i + (i >> 1)) & 1]++;
     for (let i = 0; i < e.legs.length; i++) {
       const l = e.legs[i], grp = (i + (i >> 1)) & 1;
-      hip.copy(e.pos).addScaledVector(Rv, l.side * 0.5).addScaledVector(F, l.fz);
+      hip.copy(e.pos).addScaledVector(Rv, l.side * 0.5 * sz).addScaledVector(F, l.fz);
       if (flying) {
         // tucked and trailing, paddling a little
-        rest.copy(hip).addScaledVector(F, -1.5).addScaledVector(Rv, l.side * 0.5).addScaledVector(UPV, -0.5 + Math.sin(wt * 7 + i * 1.3) * 0.25);
+        rest.copy(hip).addScaledVector(F, -1.5 * sz).addScaledVector(Rv, l.side * 0.5 * sz).addScaledVector(UPV, (-0.5 + Math.sin(wt * 7 + i * 1.3) * 0.25) * sz);
         if (!l.set) l.foot.copy(rest); else l.foot.lerp(rest, Math.min(1, dt * 10));
         l.t = 1; l.set = true;
         continue;
       }
-      rest.copy(hip).addScaledVector(Rv, l.side * 1.0).addScaledVector(e.vel, 0.1);
-      rest.addScaledVector(UPV, -(v1.copy(rest).sub(e.pos).dot(UPV) + e.h));     // down onto the ground plane under the body
+      rest.copy(hip).addScaledVector(Rv, l.side * 1.0 * sz).addScaledVector(e.vel, 0.1);
+      rest.addScaledVector(UPV, -(v1.copy(rest).sub(e.pos).dot(UPV) + Math.max(0.2, e.h)));     // down onto the ground plane under the body
       if (!l.set) { l.foot.copy(rest); l.set = true; l.t = 1; }
       if (l.t < 1) {
         l.t = Math.min(1, l.t + dt / swing);
-        l.foot.lerpVectors(l.from, rest, l.t).addScaledVector(UPV, Math.sin(l.t * Math.PI) * 0.5);
+        l.foot.lerpVectors(l.from, rest, l.t).addScaledVector(UPV, Math.sin(l.t * Math.PI) * 0.5 * sz);
       } else if (l.foot.distanceTo(rest) > stride && (busy[1 - grp] === 0 || l.foot.distanceTo(rest) > stride * 2.2)) {
         l.from.copy(l.foot); l.t = 0; busy[grp]++;
       }
@@ -485,6 +541,7 @@ export class Combat {
     const counts = {}, lc = {}; let ne = 0, nb = 0, no = 0;
     for (const el in this.bodies) { counts[el] = 0; lc[el] = 0; }
     for (const e of this.enemies) {
+      if (e.state === 'emerge' && e.em < 0.02) continue;
       const mesh = this.parts(e.el), k = counts[e.el] = counts[e.el] || 0;
       lc[e.el] = lc[e.el] || 0;
       if (k >= MAXE) continue;
@@ -494,7 +551,7 @@ export class Combat {
       F.copy(e.fwd).addScaledVector(UPV, e.pitch).normalize();
       m4.lookAt(F, v3.set(0, 0, 0), UPV); q1.setFromRotationMatrix(m4);
       const dying = e.state === 'dead' ? Math.max(0, e.dead / 0.6) : 1;
-      const s = (1 + e.flash * 0.25) * dying * (e.state === 'rewind' ? 0.8 : 1) * 0.85;
+      const sz = e.sz, s = (1 + e.flash * 0.25) * dying * (e.state === 'rewind' ? 0.8 : 1) * 0.85 * sz * (e.state === 'emerge' ? 0.35 + 0.65 * Math.min(1, e.em) : 1);
       // torso sways with the stride
       v1.addScaledVector(UPV, Math.sin(time * 9 + e.phase * 3) * Math.min(0.12, e.vel.length() * 0.012));
       m4.compose(v1, q1, sc.setScalar(s));
@@ -503,22 +560,23 @@ export class Combat {
       Rv.crossVectors(UPV, F).normalize();
       v2.copy(g.headSolar).sub(e.pos).normalize();
       if (e.state === 'idle') v2.copy(F);
-      e.head.copy(e.pos).addScaledVector(F, 1.15).addScaledVector(UPV, 0.45 + e.pitch * 0.6);
+      e.head.copy(e.pos).addScaledVector(F, 1.15 * sz).addScaledVector(UPV, (0.45 + e.pitch * 0.6) * sz);
       m4.lookAt(v3.copy(v2).multiplyScalar(0.7).add(F).normalize(), sc.set(0, 0, 0), UPV); const hq = new THREE.Quaternion().setFromRotationMatrix(m4);
       m4.compose(v3.copy(e.head).sub(o), hq, sc.setScalar(s * 1.1));
       this.heads[e.el].setMatrixAt(k, m4);
       counts[e.el] = k + 1;
       // legs: hip -> knee -> foot
       if (e.near && e.state !== 'dead') {
-        const lm = this.limbs[e.el], th = e.st.thick;
+        const lm = this.limbs[e.el], th = e.st.thick * sz;
         for (const l of e.legs) {
           if (!l.set || lc[e.el] >= MAXE * MAXL * 2 - 2) continue;
-          hip.copy(e.pos).addScaledVector(Rv, l.side * 0.5).addScaledVector(e.fwd, l.fz);
+          hip.copy(e.pos).addScaledVector(Rv, l.side * 0.5 * sz).addScaledVector(e.fwd, l.fz);
           v2.copy(l.foot).sub(hip);
-          let d = v2.length(); const reach = L1 + L2 - 0.02;
+          const l1 = L1 * sz, l2 = L2 * sz;
+          let d = v2.length(); const reach = l1 + l2 - 0.02;
           if (d > reach) { v2.multiplyScalar(reach / d); d = reach; }
           v2.divideScalar(d || 1);
-          const a = (L1 * L1 - L2 * L2 + d * d) / (2 * d || 1), hgt = Math.sqrt(Math.max(0, L1 * L1 - a * a));
+          const a = (l1 * l1 - l2 * l2 + d * d) / (2 * d || 1), hgt = Math.sqrt(Math.max(0, l1 * l1 - a * a));
           bend.copy(UPV).addScaledVector(Rv, l.side * 0.7).addScaledVector(v2, -(UPV.dot(v2) + Rv.dot(v2) * l.side * 0.7)).normalize();
           knee.copy(hip).addScaledVector(v2, a).addScaledVector(bend, hgt);
           v3.copy(knee).sub(hip); const u1 = v3.length();
@@ -534,13 +592,13 @@ export class Combat {
         const hot = e.state === 'chase' || e.state === 'pursue';
         const rgb = ELEMENTS[e.el].rgb, pulse = e.act === 'windup' || e.act === 'crouch' ? 2.1 : 1;
         if (e.state === 'rewind') col.setRGB(1, 0.8, 0.4); else if (e.pacify > 0) col.setRGB(0.5, 0.6, 0.7); else if (e.slow > 0 || g.time.slowT > 0) col.setRGB(0.45, 0.8, 1); else col.setRGB(hot ? 1 : rgb[0], hot ? rgb[1] * 0.35 : rgb[1], hot ? rgb[2] * 0.3 : rgb[2]);
-        v2.set(0, 0.05, 0.5).applyQuaternion(hq).add(e.head).sub(o);
-        m4.compose(v2, hq, sc.setScalar((e.state === 'pursue' ? 0.8 + Math.min(4, v2.length() * 0.004) : 0.26) * pulse));
+        v2.set(0, 0.05, 0.5).multiplyScalar(sz).applyQuaternion(hq).add(e.head).sub(o);
+        m4.compose(v2, hq, sc.setScalar((e.state === 'pursue' ? 0.8 + Math.min(4, v2.length() * 0.004) : 0.26 * sz) * pulse));
         this.eyes.setMatrixAt(ne, m4); this.eyes.setColorAt(ne, col);
         if (e.hp < e.max) {
           const f = Math.max(0, e.hp / e.max);
-          v2.copy(e.pos).sub(o).addScaledVector(UPV, 2.6);
-          m4.compose(v2, camQ, sc.set(2.2 * f, 0.16, 1));
+          v2.copy(e.pos).sub(o).addScaledVector(UPV, 2.6 * sz);
+          m4.compose(v2, camQ, sc.set(2.2 * f * sz, 0.16 * Math.sqrt(sz), 1));
           this.bars.setMatrixAt(nb, m4); this.bars.setColorAt(nb, col.setRGB(1 - f * 0.7, 0.25 + f * 0.7, 0.2)); nb++;
         }
         ne++;
@@ -552,6 +610,15 @@ export class Combat {
     }
     for (const b of this.bolts) {
       if (no >= MAXB) break;
+      if (b.from === 'slash') {
+        // a curved blade of sparks
+        for (let k = -3; k <= 3 && no < MAXB; k++) {
+          v1.copy(b.pos).sub(o).addScaledVector(b.sweep, (k / 3) * b.half).addScaledVector(v2.copy(b.vel).normalize(), -Math.abs(k) * 0.18 * b.half * 0.3);
+          m4.compose(v1, q1.identity(), sc.setScalar((0.34 - Math.abs(k) * 0.05) * Math.min(1, b.life * 5) * (b.perfect ? 1.5 : 1)));
+          this.orbs.setMatrixAt(no, m4); this.orbs.setColorAt(no, col.setRGB(...b.rgb)); no++;
+        }
+        continue;
+      }
       m4.compose(v1.copy(b.pos).sub(o), q1.identity(), sc.setScalar(b.size * (b.from === 'fx' ? Math.min(1, b.life * 4) : 1)));
       this.orbs.setMatrixAt(no, m4); this.orbs.setColorAt(no, col.setRGB(...b.rgb)); no++;
     }

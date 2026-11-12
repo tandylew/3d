@@ -1,25 +1,55 @@
-// Touch controls for phones and tablets: a floating stick under the left
-// thumb, drag-to-look anywhere else, and hold buttons under the right thumb.
-// Everything lands in `input.touch`, which Input merges with the keyboard.
+// Touch controls for phones and tablets: twin sticks (left moves, right looks)
+// and a small arc of action buttons. Everything lands in `input.touch`, which
+// Input merges with the keyboard.
 
 const BUTTONS = [
-  { id: 'fly', label: 'FLY', hold: true },
-  { id: 'up', label: '▲', hold: true },
-  { id: 'down', label: '▼', hold: true },
-  { id: 'grip', label: 'GATHER', hold: true },
-  { id: 'act', label: 'GATE', hold: false },
+  { id: 'cast', label: 'CAST', hold: true },
+  { id: 'time', label: 'TIME' },
+  { id: 'cycle', label: '⟳' },
+  { id: 'jump', label: 'LEAP' },
+  { id: 'fly', label: 'FLY', toggle: true },
 ];
+
+class Stick {
+  constructor(el, out, side) {
+    this.el = el; this.knob = el.firstElementChild; this.out = out; this.side = side;
+    this.id = null; this.ox = 0; this.oy = 0;
+  }
+
+  start(e) {
+    this.id = e.pointerId; this.ox = e.clientX; this.oy = e.clientY;
+    this.el.style.left = e.clientX + 'px'; this.el.style.top = e.clientY + 'px'; this.el.style.right = 'auto';
+    this.el.classList.add('on');
+    this.set(0, 0);
+  }
+
+  move(e) {
+    const R = 56;
+    let dx = (e.clientX - this.ox) / R, dy = (e.clientY - this.oy) / R;
+    const l = Math.hypot(dx, dy);
+    if (l > 1) { dx /= l; dy /= l; }
+    this.set(dx, dy);
+    const dead = l < 0.12 ? 0 : 1;
+    this.out.set(dx * dead, -dy * dead);
+  }
+
+  end() {
+    this.id = null; this.out.set(0, 0);
+    this.el.classList.remove('on'); this.el.style.left = this.el.style.top = this.el.style.right = '';
+    this.set(0, 0);
+  }
+
+  set(dx, dy) { this.knob.style.transform = `translate(${dx * 46}px, ${dy * 46}px)`; }
+}
 
 export class TouchControls {
   constructor(input, root) {
     this.input = input; this.root = root;
     this.enabled = false;
-    this.stickId = null; this.lookId = null;
-    this.origin = { x: 0, y: 0 }; this.last = { x: 0, y: 0 };
-
+    const t = input.touch;
     const pad = this.pad = root.querySelector('#t-pad');
-    this.base = root.querySelector('#t-base');
-    this.knob = root.querySelector('#t-knob');
+    this.left = new Stick(root.querySelector('#t-left'), t.move, 'left');
+    this.right = new Stick(root.querySelector('#t-right'), t.look, 'right');
     this.btn = {};
     const cluster = root.querySelector('#t-buttons');
     for (const b of BUTTONS) {
@@ -27,69 +57,57 @@ export class TouchControls {
       el.className = 't-btn t-' + b.id; el.textContent = b.label;
       cluster.appendChild(el);
       this.btn[b.id] = el;
-      const set = (v) => {
-        el.classList.toggle('on', !!v);
-        const t = input.touch;
-        if (b.id === 'act') { if (v) t.act = true; } else t[b.id] = v ? 1 : 0;
-      };
-      el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); try { el.setPointerCapture(e.pointerId); } catch { /* fine */ } set(true); });
-      for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(ev, () => set(false));
+      el.addEventListener('pointerdown', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        try { el.setPointerCapture(e.pointerId); } catch { /* fine */ }
+        if (b.toggle) input.flyMode = !input.flyMode;
+        else if (b.hold) { t[b.id] = 1; el.classList.add('on'); }
+        else { t[b.id] = true; el.classList.add('on'); setTimeout(() => el.classList.remove('on'), 160); }
+      });
+      if (b.hold) for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(ev, () => { t[b.id] = 0; el.classList.remove('on'); });
     }
 
     pad.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       try { pad.setPointerCapture(e.pointerId); } catch { /* fine */ }
-      const leftSide = e.clientX < innerWidth * 0.42 && e.clientY > innerHeight * 0.3;
-      if (leftSide && this.stickId === null) {
-        this.stickId = e.pointerId;
-        this.origin.x = e.clientX; this.origin.y = e.clientY;
-        this.base.style.left = e.clientX + 'px'; this.base.style.top = e.clientY + 'px';
-        this.base.classList.add('on');
-        this.moveKnob(0, 0);
-      } else if (this.lookId === null) {
-        this.lookId = e.pointerId;
-        this.last.x = e.clientX; this.last.y = e.clientY;
-      }
+      const s = e.clientX < innerWidth / 2 ? this.left : this.right;
+      if (s.id === null) s.start(e);
     });
-    pad.addEventListener('pointermove', (e) => {
-      if (e.pointerId === this.stickId) {
-        const R = 56;
-        let dx = (e.clientX - this.origin.x) / R, dy = (e.clientY - this.origin.y) / R;
-        const l = Math.hypot(dx, dy);
-        if (l > 1) { dx /= l; dy /= l; }
-        this.moveKnob(dx, dy);
-        const dead = l < 0.12 ? 0 : 1;
-        input.touch.move.set(dx * dead, -dy * dead);
-      } else if (e.pointerId === this.lookId) {
-        const k = 0.0052 * Math.min(1, 900 / Math.max(innerWidth, innerHeight)) + 0.0012;
-        input.look((e.clientX - this.last.x) * k, (e.clientY - this.last.y) * k);
-        this.last.x = e.clientX; this.last.y = e.clientY;
-      }
-    });
-    const end = (e) => {
-      if (e.pointerId === this.stickId) {
-        this.stickId = null; input.touch.move.set(0, 0);
-        this.base.classList.remove('on'); this.base.style.left = this.base.style.top = '';
-        this.moveKnob(0, 0);
-      } else if (e.pointerId === this.lookId) this.lookId = null;
-    };
+    pad.addEventListener('pointermove', (e) => { for (const s of [this.left, this.right]) if (e.pointerId === s.id) s.move(e); });
+    const end = (e) => { for (const s of [this.left, this.right]) if (e.pointerId === s.id) s.end(); };
     pad.addEventListener('pointerup', end);
     pad.addEventListener('pointercancel', end);
     root.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  moveKnob(dx, dy) { this.knob.style.transform = `translate(${dx * 46}px, ${dy * 46}px)`; }
-
   setEnabled(on) {
     this.enabled = on;
     this.input.touch.on = on;
     this.root.hidden = !on;
-    if (!on) { const t = this.input.touch; t.move.set(0, 0); t.fly = t.up = t.down = t.grip = 0; }
+    if (!on) { const t = this.input.touch; t.move.set(0, 0); t.look.set(0, 0); t.cast = 0; }
   }
 
-  // Dev demos light up the button they are "pressing".
+  // Called every frame: reflect game state on the buttons (what CAST will
+  // throw, which relic TIME uses and whether it is ready).
+  sync(s) {
+    const b = this.btn;
+    b.fly.classList.toggle('on', this.input.flyMode);
+    b.cast.style.setProperty('--c', s.castCss || '#8899aa');
+    b.cast.classList.toggle('empty', !s.castCount);
+    b.cast.dataset.n = s.castCount || '';
+    b.time.hidden = b.cycle.hidden = !s.weapon;
+    if (s.weapon) {
+      b.time.textContent = s.weapon.short; b.time.style.setProperty('--c', s.weapon.css);
+      b.time.classList.toggle('empty', !s.weapon.ready);
+      b.time.dataset.n = s.weapon.count ?? '';
+      b.cycle.hidden = !s.weapon.many;
+    }
+  }
+
+  // Dev demos light up the control they are "pressing".
   highlight(ids) {
     for (const id in this.btn) this.btn[id].classList.toggle('demo', ids.includes(id));
-    this.base.classList.toggle('demo', ids.includes('stick'));
+    this.left.el.classList.toggle('demo', ids.includes('stick'));
+    this.right.el.classList.toggle('demo', ids.includes('look'));
   }
 }

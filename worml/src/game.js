@@ -1,7 +1,7 @@
-// Game orchestration: world streaming, the elemental quest, wormhole transits,
-// HUD state and persistence.
+// Game orchestration: world streaming, the elemental quest, health and
+// combat, time relics, wormhole transits, HUD state and persistence.
 import * as THREE from 'three';
-import { PLANETS, PLANET_BY_ID, ELEMENTS, ELEMENT_ORDER } from './worlds.js';
+import { PLANETS, PLANET_BY_ID, ELEMENTS, ELEMENT_ORDER, WEAK_TO, WEAPONS } from './worlds.js';
 import { smoothstep } from './noise.js';
 import { makeDetailTexture, syncEnv } from './gfx.js';
 import { Planet, TerrainManager } from './planet.js';
@@ -12,20 +12,24 @@ import { EssenceField } from './essence.js';
 import { Props } from './props.js';
 import { Hud } from './hud.js';
 import { Streaks, Tunnel } from './fx.js';
+import { Combat } from './combat.js';
+import { Timeworks } from './timeworks.js';
 
-const SAVE_KEY = 'worml-save-v1';
+export const SAVE_KEY = 'worml-save-v2';
 const QUEST = ['thalassa', 'pyra', 'ferrum', 'sylva', 'petra', 'arcana'];
 const SOURCE = { water: 'thalassa', fire: 'pyra', metal: 'ferrum', wood: 'sylva', earth: 'petra', magic: 'arcana' };
-const CAP = 9;
+const CAP = 12;
 
 const headScene = new THREE.Vector3(), headLocal = new THREE.Vector3(), playerLocal = new THREE.Vector3();
-const gl = new THREE.Vector3(), v1 = new THREE.Vector3(), camUp = new THREE.Vector3(), camQ = new THREE.Quaternion();
+const gl = new THREE.Vector3(), v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), camUp = new THREE.Vector3(), camQ = new THREE.Quaternion();
 
 function freshState() {
   return {
-    open: { thalassa: true }, order: ['thalassa'], dest: {}, visited: {}, won: false,
+    open: { thalassa: true }, order: ['thalassa'], visited: {}, won: false,
     inv: Object.fromEntries(ELEMENT_ORDER.map((e) => [e, 0])),
     charge: Object.fromEntries(PLANETS.map((p) => [p.id, {}])),
+    weapons: {}, sel: null,
+    unburied: Object.fromEntries(PLANETS.map((p) => [p.id, {}])),
   };
 }
 
@@ -38,57 +42,84 @@ export class Game {
     this.planets = PLANETS.map((def, i) => new Planet(def, i, this.manager, this.detail, scene, this.sky.cloudMap));
     this.gates = new Map(); this.fields = new Map();
     for (const p of this.planets) {
-      const g = new Gate(p, this.detail);
-      this.gates.set(p.def.id, g);
-      this.fields.set(p.def.id, new EssenceField(p, g));
+      this.gates.set(p.def.id, new Gate(p, this.detail));
+      this.fields.set(p.def.id, new EssenceField(p));
     }
     this.props = new Props();
     this.player = new Player(rig, camera, this.planets);
     this.hud = new Hud(scene, rig, camera, input);
     this.streaks = new Streaks(scene);
     this.tunnel = new Tunnel(rig, this.detail);
-    this.transit = null; this.deliverT = 0; this.pendingUnlock = null; this.hintT = 0; this.saveT = 0;
-    this.started = false; this.time = 0;
+    this.combat = new Combat(this, scene);
+    this.time = new Timeworks(this, scene);
+    this.transit = null; this.pendingUnlock = null; this.saveT = 0;
+    this.started = false; this.clock = 0; this.worldTime = 0;
+    this.health = 100; this.hurtT = 99; this.hurtFlash = 0; this.dead = null;
+    this.castCool = 0; this.castEl = null; this.told = {}; this.tellT = {};
+    this.headSolar = new THREE.Vector3();
 
     this.state = freshState();
     try {
       const raw = localStorage.getItem(SAVE_KEY);
-      if (raw) Object.assign(this.state, JSON.parse(raw));
+      if (raw) { const s = JSON.parse(raw), f = freshState(); Object.assign(this.state, s); for (const k of ['weapons', 'unburied', 'charge', 'inv']) this.state[k] = { ...f[k], ...(s[k] || {}) }; }
     } catch { /* no storage: play without saving */ }
-    for (const [id, g] of this.gates) g.setOpen(!!this.state.open[id], true);
-    this.updateDests();
+    this.applyState();
 
     const home = this.gates.get('thalassa');
-    this.player.place(home.planet, home.frontDir(27), 0, home.z.clone().negate());
+    this.player.place(home.planet, home.frontDir(36), 0, home.z.clone().negate());
+  }
+
+  applyState() {
+    for (const [id, g] of this.gates) g.setOpen(!!this.state.open[id], true);
+    for (const [id, f] of this.fields) for (const d of f.deposits) if (d.site.buried) f.setBuried(d.index, !this.state.unburied[id]?.[d.index]);
+    this.updateDests();
+    this.pendingUnlock = null;
   }
 
   reset() {
     this.state = freshState();
     try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
-    for (const [id, g] of this.gates) g.setOpen(!!this.state.open[id], true);
-    for (const g of this.gates.values()) g.setDest(null);
-    this.updateDests();
-    this.pendingUnlock = null;
+    this.applyState();
+    this.health = 100; this.told = {};
+    this.combat.dropPursuit(); this.combat.setPlanet(null);
+    this.time.echo = null;
   }
 
   save() { this.saveT = 0.5; }
 
-  // Dev/test helper: hover above a world's gate site.
-  warpTo(id, height = 0, back = 27) {
+  // Stand `back` metres from a world's wellhead, `height` above the ground.
+  warpTo(id, height = 0, back = 36) {
     const g = this.gates.get(id);
     this.player.place(g.planet, g.frontDir(back), height, g.z.clone().negate());
+    this.combat.dropPursuit();
+  }
+
+  // Hang in a world's hollow core, in front of its gate (if its shaft is open).
+  warpCore(id, side = 1) {
+    const g = this.gates.get(id);
+    if (!g.planet.shaftOpen) return false;
+    this.player.placeCore(g.planet, g.z.clone().multiplyScalar(40 * side).addScaledVector(g.up, -1.7), g.z.clone().multiplyScalar(-side));
+    this.combat.dropPursuit();
+    return true;
   }
 
   labels() {
-    if (this.renderer.xr.isPresenting) return { fly: 'point & squeeze TRIGGER', grip: 'GRIP', act: 'A' };
-    if (this.input.touch.on) return { fly: 'look & hold FLY', grip: 'GATHER', act: 'GATE' };
-    return { fly: 'look & hold W', grip: 'E', act: 'F' };
+    if (this.renderer.xr.isPresenting) return { fly: 'point & squeeze TRIGGER', cast: 'RIGHT GRIP', time: 'LEFT GRIP', cycle: 'B', jump: 'A', hud: 'Y' };
+    if (this.input.touch.on) return { fly: 'FLY, then the left stick', cast: 'CAST', time: 'TIME', cycle: '⟳', jump: 'LEAP', hud: '◎' };
+    return { fly: 'F, then W', cast: 'LEFT CLICK', time: 'E', cycle: 'Q', jump: 'SPACE', hud: 'H' };
+  }
+
+  // Say something once per `gap` seconds at most (hints that could otherwise nag).
+  tell(key, gap, title, sub, sec = 5, css = '#ffffff') {
+    if ((this.tellT[key] || -1e9) + gap > this.clock) return;
+    this.tellT[key] = this.clock;
+    this.hud.say(title, sub, sec, css);
   }
 
   // ---- dev dashboard helpers
   nextSealed() { const id = QUEST.find((q) => !this.state.open[q]); return id ? this.gates.get(id) : null; }
 
-  grant(n) { for (const el of ELEMENT_ORDER) this.state.inv[el] = el === 'magic' ? 0 : Math.max(0, Math.min(CAP, n)); this.save(); }
+  grant(n) { for (const el of ELEMENT_ORDER) this.state.inv[el] = el === 'magic' ? 0 : Math.max(0, Math.min(CAP, n)); this.hud.poke(); this.save(); }
 
   grantFor(gate) {
     const needs = gate.planet.def.needs || {}, ch = this.state.charge[gate.planet.def.id];
@@ -103,20 +134,20 @@ export class Game {
     this.started = true;
     const L = this.labels(), fresh = this.state.order.length === 1 && !this.state.inv.water;
     if (fresh) {
-      this.hud.say('Welcome to Thalassa', `Hold ${L.grip} near the glowing orbs to gather Water`, 8, ELEMENTS.water.css);
-      this.hud.say('To fly: ' + L.fly, 'The higher you are, the faster you go. Aim at a world to travel.', 9);
+      this.hud.say('Welcome to Thalassa', 'Essence wells up where a pillar of light stands under a gap in the clouds', 8, ELEMENTS.water.css);
+      this.hud.say(`${L.jump} to leap high · ${L.hud} for objectives`, 'Walk into essence to gather it. It becomes your power.', 9);
     } else this.hud.say('Welcome back', this.objective().lines[0], 6);
   }
 
+  // The linked worlds form a ring in the order they were opened: each gate's
+  // front face leads onward round it, its back face leads back.
   updateDests() {
-    const s = this.state;
-    for (const id of s.order) {
-      const others = s.order.filter((o) => o !== id);
-      let d = s.dest[id];
-      if (!others.includes(d)) d = others[others.length - 1] || null;
-      s.dest[id] = d;
-      this.gates.get(id).setDest(d ? this.gates.get(d) : null);
+    const o = this.state.order, n = o.length;
+    for (let i = 0; i < n; i++) {
+      const g = this.gates.get(o[i]);
+      g.setDests(n > 1 ? this.gates.get(o[(i + 1) % n]) : null, n > 1 ? this.gates.get(o[(i - 1 + n) % n]) : null);
     }
+    for (const [id, g] of this.gates) if (!o.includes(id)) g.setDests(null, null);
   }
 
   objective() {
@@ -127,24 +158,25 @@ export class Game {
       const short = def.needs[el] - (s.charge[id][el] || 0) - s.inv[el];
       if (short > 0) {
         const src = PLANET_BY_ID[SOURCE[el]];
-        return { lines: [`Gather ${short} more ${ELEMENTS[el].label} essence on ${src.name}`, `Hold ${L.grip} near the glowing orbs`], goal: src.id };
+        return { lines: [`Gather ${short} more ${ELEMENTS[el].label} essence on ${src.name}`, 'Deposits: craters under pillars of light and gaps in the cloud'], goal: src.id, gather: true };
       }
     }
     const here = this.player.planet.def.id === id && this.player.alt < 4000;
     return {
-      lines: here ? [`Release your essence into the ${def.name} gate`, `Hold ${L.grip} beside the gate`]
-        : [`Travel to ${def.name}: ${L.fly}`, def.lock],
+      lines: here ? [`Break the seal on ${def.name}'s well`, `Aim at it and ${L.cast}`]
+        : [`Travel to ${def.name}`, this.player.inside ? `Pass through the gate, or ${L.jump} to ride up and fly` : def.lock],
       goal: id,
     };
   }
 
   unlock(gate) {
     const s = this.state, def = gate.planet.def;
+    if (s.open[def.id]) return;
     s.open[def.id] = true; s.order.push(def.id);
     gate.setOpen(true);
     this.updateDests();
     this.audio.unlock();
-    this.hud.say(`${def.name} wormhole established`, 'Step through the ring to travel between linked worlds instantly', 8, ELEMENTS[def.element].css);
+    this.hud.say(`${def.name}'s well is open`, 'Step into the shaft: its gate hangs at the core of the world', 8, ELEMENTS[def.element].css);
     if (QUEST.every((q) => s.open[q])) {
       s.won = true;
       this.hud.say('WORML COMPLETE', 'Every world is linked. The whole system is yours to roam.', 14, '#ffe9a8');
@@ -153,11 +185,107 @@ export class Game {
     this.save();
   }
 
-  startTransit(gate) {
-    this.transit = { t: 0, from: gate, to: gate.dest, moved: false, out: 0 };
+  // ------------------------------------------------------------- combat glue
+  targetPos() {
+    const e = this.time.echo;
+    return this.decoyActive() ? v2.set(0, 1.4, 0).applyQuaternion(e.quat).add(e.pos) : this.headSolar;
+  }
+
+  decoyActive() { return !!this.time.echo && this.time.freezeT <= 0; }
+
+  // The seal on the current world's well, as a target for cast bolts.
+  sealTarget() {
+    const P = this.player.planet, gate = this.gates.get(P.def.id);
+    if (gate.open || this.pendingUnlock || this.player.alt > 3000) return null;
+    return { pos: v2.copy(P.pos).add(gate.site).addScaledVector(gate.up, 3).clone(), r: 17, gate };
+  }
+
+  hitSeal(el) {
+    const P = this.player.planet, def = P.def, gate = this.gates.get(def.id), needs = def.needs, ch = this.state.charge[def.id];
+    if (!needs || gate.open) return;
+    if (needs[el] && (ch[el] || 0) < needs[el]) {
+      ch[el] = (ch[el] || 0) + 1;
+      gate.flash(ELEMENTS[el].rgb);
+      this.audio.deliver(el);
+      const done = Object.keys(needs).reduce((n, k) => n + Math.min(ch[k] || 0, needs[k]), 0), total = Object.values(needs).reduce((a, b) => a + b, 0);
+      if (done >= total) this.pendingUnlock = { gate, t: 0.8 };
+      else this.hud.say(`The seal weakens: ${done} / ${total}`, '', 1.6, ELEMENTS[el].css);
+      this.save();
+    } else {
+      const want = Object.keys(needs).filter((k) => (ch[k] || 0) < needs[k]).map((k) => ELEMENTS[k].label).join(', ');
+      this.tell('sealwrong', 4, 'The seal shrugs it off', `${def.lock} It needs ${want}.`, 4);
+    }
+  }
+
+  gain(el, n) {
+    const s = this.state;
+    s.inv[el] = Math.min(CAP, s.inv[el] + n);
+    this.audio.pickup(el);
+    this.hud.poke();
+    if (!this.told.power) { this.told.power = true; this.hud.say(`${ELEMENTS[el].label} essence is now your power`, `${this.labels().cast} to cast it at guardians and seals. Each cast spends one.`, 7, ELEMENTS[el].css); }
+    this.save();
+  }
+
+  hurt(dmg) {
+    if (this.dead || this.transit || !this.started) return;
+    this.health -= dmg; this.hurtT = 0; this.hurtFlash = 1;
+    this.audio.tone(90, 0.22, 'sawtooth', 0.2, 0, 0.5);
+    for (const h of [this.input.left, this.input.right]) this.input.pulse(h, 0.9, 80);
+    if (this.health < 45 && this.time.has('pearls') && this.combat.hunting >= 2) this.tell('pearlhint', 40, 'Outnumbered', `Swallow a Stillwater Pearl: ${this.labels().time}`, 4, WEAPONS.pearls.css);
+    if (this.health <= 0) this.die();
+  }
+
+  die() {
+    this.health = 0;
+    this.dead = { t: 0, moved: false };
+    this.player.frozen = true;
+    this.audio.tone(60, 1.6, 'sawtooth', 0.2, 0, 0.3);
+    this.hud.say('You are unmade', 'Half your essence scatters. You gather yourself at the wellhead.', 6, '#ff8a7a');
+  }
+
+  onAggro(e) {
+    const weak = WEAK_TO[e.el], L = this.labels();
+    this.tell('aggro', 45, 'Guardians!', weak && this.state.inv[weak] ? `${ELEMENTS[weak].label} overcomes ${ELEMENTS[e.el].label}: aim and ${L.cast}`
+      : Object.values(this.state.inv).some((n) => n) ? `Aim and ${L.cast}. ${weak ? ELEMENTS[weak].label + ' would hit them hardest.' : ''}` : 'You have no essence to cast. Gather some, or outrun them.', 6, ELEMENTS[e.el].css);
+  }
+
+  onPursue() { this.tell('pursue', 60, 'They are following you', 'Guardians chase through open space. Only a wormhole shakes them.', 6, '#ff8a7a'); }
+
+  onHit(e, mult) {
+    if (mult > 1.5 && !this.told.weak) { this.told.weak = true; this.hud.say('Overcome!', `${ELEMENTS[WEAK_TO[e.el]].label} overcomes ${ELEMENTS[e.el].label}`, 3, ELEMENTS[WEAK_TO[e.el]].css); }
+    this.audio.tone(mult > 1.5 ? 520 : 300, 0.12, 'triangle', 0.12);
+  }
+
+  onKill() { /* drop is handled by Combat */ }
+
+  // Which element a cast along this ray should spend: what the thing you are
+  // aiming at is weak to, if you carry it; otherwise whatever you hold most of.
+  pickElement(origin, dir) {
+    const inv = this.state.inv, seal = this.sealTarget();
+    if (seal) {
+      v1.copy(seal.pos).sub(origin);
+      const t = v1.dot(dir);
+      if (t > 0 && t < 400 && v1.addScaledVector(dir, -t).length() < 22) {
+        const needs = seal.gate.planet.def.needs, ch = this.state.charge[seal.gate.planet.def.id];
+        const el = Object.keys(needs).find((k) => (ch[k] || 0) < needs[k] && inv[k] > 0);
+        if (el) return el;
+      }
+    }
+    const pick = this.combat.rayPick(origin, dir, 260);
+    let foe = pick?.enemy;
+    if (!foe && this.combat.hunting) { let bd = 1e9; for (const e of this.combat.enemies) { if (e.state !== 'chase') continue; const d = e.pos.distanceTo(origin); if (d < bd) { bd = d; foe = e; } } }
+    if (foe && WEAK_TO[foe.el] && inv[WEAK_TO[foe.el]] > 0) return WEAK_TO[foe.el];
+    let best = null;
+    for (const el of ELEMENT_ORDER) if (inv[el] > 0 && (!best || inv[el] > inv[best]) && !(foe && el === foe.el && Object.values(inv).filter((n) => n).length > 1)) best = el;
+    return best;
+  }
+
+  // ------------------------------------------------------------- wormholes
+  startTransit(gate, to, forward) {
+    this.transit = { t: 0, from: gate, to, forward, moved: false, out: 0 };
     this.player.frozen = true;
     this.tunnel.u.uColor.value.set(...gate.color);
-    this.tunnel.u.uColor2.value.set(...gate.dest.color);
+    this.tunnel.u.uColor2.value.set(...to.color);
     this.tunnel.aim(this.camera);
     this.audio.warp();
     for (const h of [this.input.left, this.input.right]) this.input.pulse(h, 0.8, 300);
@@ -168,12 +296,17 @@ export class Game {
     tr.t += dt;
     let alpha = Math.min(1, tr.t / 0.35);
     if (!tr.moved && tr.t > 0.5) {
-      const to = tr.to;
-      this.player.place(to.planet, to.frontDir(24), 0, to.z);
+      // Going onward you step out of the far gate's back face (so the door
+      // behind you leads back); going back, out of its front face.
+      const to = tr.to, side = tr.forward ? -1 : 1;
+      this.player.placeCore(to.planet, to.z.clone().multiplyScalar(26 * side).addScaledVector(to.up, -1.7), to.z.clone().multiplyScalar(side));
+      to.lastZ = side;
+      this.combat.dropPursuit();       // nothing follows you through a wormhole
+      this.time.echo = null;
       this.tunnel.aim(this.camera);
       tr.moved = true;
     }
-    // Hold the tunnel until the destination terrain has streamed in.
+    // Hold the tunnel until the destination has streamed in.
     if (tr.moved && tr.t > 2.6 && (this.manager.pending === 0 || tr.t > 10)) {
       tr.out += dt / 0.7;
       alpha = 1 - tr.out;
@@ -181,97 +314,150 @@ export class Game {
         this.transit = null;
         this.player.frozen = false;
         const def = tr.to.planet.def;
-        this.hud.say(`${def.name}`, def.title, 4, ELEMENTS[def.element].css);
+        this.hud.say(`Core of ${def.name}`, `${this.labels().jump} to ride the shaft up to the surface`, 6, ELEMENTS[def.element].css);
         alpha = 0;
       }
     }
-    this.tunnel.set(alpha, smoothstep(0.4, 2.2, tr.t), this.time, this.camera);
+    this.tunnel.set(alpha, smoothstep(0.4, 2.2, tr.t), this.clock, this.camera);
   }
 
+  // What the on-screen buttons should show.
+  uiState() {
+    const el = this.castEl;
+    return { castCss: el ? ELEMENTS[el].css : null, castCount: el ? this.state.inv[el] : 0, weapon: this.time.current() };
+  }
+
+  // ------------------------------------------------------------------ frame
   frame(dt, time) {
-    this.time = time;
-    const { input, player, hud, state: s } = this;
-    input.frame();
+    this.clock = time;
+    const { input, player, hud, state: s, combat } = this;
+    input.frame(dt);
+    const ws = this.time.worldScale;
+    this.worldTime += dt * ws;
+    const wt = this.worldTime;
     if (this.transit) this.updateTransit(dt);
+
+    // ---- one-shot actions
+    const L = this.labels();
+    if (this.started && !this.transit && !this.dead) {
+      if (input.hudEdge) hud.toggleObjectives();
+      if (input.flyEdge && !input.touch.on) hud.say(input.flyMode ? 'Flight on' : 'Flight off', input.flyMode ? 'Forward flies where you look. You hover when still.' : 'You walk, and fall if in the air.', 1.6);
+      if (input.jumpEdge && player.jump()) {
+        this.audio.sweep(0.9, 300, 2400, 0.3);
+        if (player.inside) this.tell('ride', 30, 'Riding the shaft', 'Up to the wellhead', 3);
+        else if (!this.told.leap) { this.told.leap = true; hud.say('Leap!', `Again in the air to go higher. ${L.fly} to steer.`, 5); }
+      }
+      if (input.cycleEdge) this.time.cycle(1);
+      if (input.select >= 0) this.time.select(input.select);
+    }
     player.update(dt, input);
 
-    for (const p of this.planets) p.update(player.pos, time);
+    for (const p of this.planets) p.update(player.pos, wt);
     this.manager.pump();
-    const P = player.planet, def = P.def, id = def.id, alt = player.alt;
+    const P = player.planet, def = P.def, id = def.id, alt = player.alt, inside = player.inside;
     syncEnv(P);
-    this.sky.update(player.pos, time);
+    this.sky.update(player.pos, wt);
 
     this.camera.getWorldPosition(headScene);
+    this.headSolar.copy(headScene).add(player.pos);
     headLocal.copy(headScene).sub(P.group.position);
     playerLocal.copy(player.pos).sub(P.pos);
     const gate = this.gates.get(id), field = this.fields.get(id);
-    for (const g of this.gates.values()) g.group.visible = g === gate && alt < 90000;
-    for (const f of this.fields.values()) f.mesh.visible = f === field && alt < 5000;
-    const gateDist = gate.update(dt, time, headLocal);
-    this.props.update(P, playerLocal, alt);
-    this.streaks.update(dt, player.vel, player.speed, alt);
+    for (const g of this.gates.values()) {
+      g.siteGroup.visible = g === gate && alt < 90000;
+      g.group.visible = g === gate && (inside || alt < 200);
+    }
+    for (const p of this.planets) p.shaft.visible = p.chamber.visible = p === P && p.shaftOpen && alt < 3000;
+    for (const f of this.fields.values()) f.group.visible = f === field && alt < 120000 && !inside;
+    const gateDist = gate.update(dt * ws, wt, headLocal);
+    if (inside) this.props.group.visible = false; else this.props.update(P, playerLocal, alt);
+    this.streaks.update(dt, player.vel, player.speed, inside ? 500 : alt);
 
-    // --- gather essence
+    // ---- essence: walk into it and it is yours
     const hands = [];
-    for (const h of [input.left, input.right]) if (h.active) hands.push({ p: v1.copy(h.pos).sub(P.group.position).clone(), grip: h.grip, src: h });
-    if (field.mesh.visible && hands.length && !this.transit) {
-      const got = field.update(dt, time, hands, headLocal, s.inv[def.element] < CAP);
-      for (const h of got) {
-        s.inv[def.element] = Math.min(CAP, s.inv[def.element] + 1);
-        this.audio.pickup(def.element);
-        input.pulse(h.src, 0.6, 50);
-        this.save();
+    for (const h of [input.left, input.right]) if (h.active) hands.push({ p: v1.copy(h.pos).sub(P.group.position).clone(), src: h });
+    if (field.group.visible && alt < 2500 && !this.transit && !this.dead) {
+      const got = field.update(dt, wt, hands, headLocal, s.inv[def.element] < CAP);
+      for (const h of got) { this.gain(def.element, 1); input.pulse(h.src, 0.6, 50); }
+      const near = field.nearest(headLocal);
+      if (near.dist < 70 && near.dep.buried && near.dep.undo < 0) {
+        this.tell('buried', 50, 'This deposit lies buried', this.time.has('rewinder') ? `Undo the collapse: aim the Rewinder at it (${L.time})` : 'A collapse covers it. Something that reverses time could undo it.', 6);
       }
+    } else if (field.group.visible) field.update(dt, wt, [], headLocal, false);
+
+    // ---- relics and guardians
+    const tHand = input.xr ? input.left : input.right;
+    if (this.started && !this.transit && !this.dead && input.timeEdge) this.time.use(tHand);
+    this.time.update(dt, time, headLocal);
+    combat.update(dt * ws, dt, time);
+
+    // ---- casting
+    this.castCool -= dt;
+    const origin = v1.copy(input.right.pos).add(player.pos).clone(), aim = input.right.dir;
+    this.castEl = this.pickElement(origin, aim);
+    if (input.cast && this.castCool <= 0 && this.started && !this.transit && !this.dead) {
+      this.castCool = 0.3;
+      if (this.castEl) {
+        const el = this.castEl;
+        s.inv[el]--;
+        combat.castPlayer(origin, aim, el);
+        this.time.echoCast(el);
+        this.audio.tone(el === 'fire' ? 180 : el === 'water' ? 420 : 300, 0.2, 'triangle', 0.14, 0, 2.2);
+        input.pulse(input.right, 0.5, 40);
+        hud.poke(); this.save();
+      } else this.tell('empty', 6, 'No essence to cast', 'Gather some at a deposit: walk into the glowing orbs', 3);
     }
 
-    // --- gate interaction
-    this.deliverT -= dt; this.hintT -= dt;
-    if (this.pendingUnlock && (this.pendingUnlock.t -= dt) <= 0) { this.unlock(this.pendingUnlock.gate); this.pendingUnlock = null; }
-    if (!this.transit && this.started) {
-      const L = this.labels();
-      if (gateDist > 140) gate.prompted = false;
-      if (gateDist < 60 && !gate.open && !this.pendingUnlock) {
-        const needs = def.needs, ch = s.charge[id];
-        const can = Object.keys(needs).find((el) => (ch[el] || 0) < needs[el] && s.inv[el] > 0);
-        const want = Object.keys(needs).filter((el) => (ch[el] || 0) < needs[el]);
-        if (!gate.prompted) {
-          gate.prompted = true;
-          const list = want.map((el) => `${needs[el] - (ch[el] || 0)} ${ELEMENTS[el].label}`).join(', ');
-          hud.say(`${def.name} gate is sealed`, can ? `Hold ${L.grip} to release your ${ELEMENTS[can].label} essence` : `${def.lock} Needs ${list}.`, 7, ELEMENTS[def.element].css);
-        }
-        const hand = hands.find((h) => h.grip > 0.5);
-        if (hand && this.deliverT <= 0) {
-          if (can) {
-            s.inv[can]--; ch[can] = (ch[can] || 0) + 1;
-            gate.sendOrb(gate.toLocal(hand.p, gl), ELEMENTS[can].rgb);
-            gate.flash(ELEMENTS[can].rgb);
-            this.audio.deliver(can);
-            input.pulse(hand.src, 0.7, 60);
-            this.deliverT = 0.32;
-            if (Object.keys(needs).every((el) => (ch[el] || 0) >= needs[el])) this.pendingUnlock = { gate, t: 0.8 };
-            this.save();
-          } else if (this.hintT <= 0) {
-            this.hintT = 6;
-            const el = want[0];
-            hud.say(`No ${ELEMENTS[el].label} essence to release`, `Gather it on ${PLANET_BY_ID[SOURCE[el]].name}`, 4);
-          }
-        }
-      } else if (gateDist < 60 && gate.open && gate.unlockT < 0) {
-        if (!gate.prompted) {
-          gate.prompted = true;
-          if (gate.dest) hud.say(`Wormhole to ${gate.dest.planet.def.name}`, s.order.length > 2 ? `Step through the ring · press ${L.act} to change destination` : 'Step through the ring to travel', 6, ELEMENTS[gate.dest.element].css);
-          else hud.say('Wormhole dormant', 'Unseal a gate on another world to link it here', 6);
-        }
-        if (input.actEdge && s.order.length > 2) {
-          const others = s.order.filter((o) => o !== id);
-          s.dest[id] = others[(others.indexOf(s.dest[id]) + 1) % others.length];
-          this.updateDests();
-          hud.say(`Destination: ${gate.dest.planet.def.name}`, gate.dest.planet.def.title, 3, ELEMENTS[gate.dest.element].css);
-          this.save();
-        }
-        gate.toLocal(headLocal, gl);
-        if (gate.dest && Math.abs(gl.z) < 1.6 && Math.hypot(gl.x, gl.y - RING_Y) < RING_R - 1.2) this.startTransit(gate);
+    // ---- health: hurt fades, and you mend if left alone a few seconds
+    this.hurtT += dt; this.hurtFlash = Math.max(0, this.hurtFlash - dt * 2.5);
+    if (!this.dead && this.hurtT > 5 && this.health < 100) this.health = Math.min(100, this.health + 14 * dt);
+    if (this.dead) {
+      const d = this.dead; d.t += dt;
+      if (!d.moved && d.t > 1.6) {
+        d.moved = true;
+        for (const el of ELEMENT_ORDER) s.inv[el] = Math.ceil(s.inv[el] / 2);
+        this.time.echo = null; this.time.slowT = this.time.freezeT = 0;
+        this.warpTo(id, 0, 36);
+        this.health = 100; this.save();
       }
+      if (d.t > 3.2) { this.dead = null; player.frozen = false; }
+    }
+    // veil: red for hurt, blue while slowed, pale gold while frozen, black across a death
+    const low = this.health < 35 && !this.dead ? 0.25 + 0.15 * Math.sin(time * 6) : 0;
+    const tint = hud.veilU.uTint.value, fade = hud.veilU.uFade.value;
+    if (this.hurtFlash > 0.01 || low) tint.set(0.9, 0.05, 0.03, Math.max(this.hurtFlash * 0.8, low));
+    else if (this.time.freezeT > 0) tint.set(1.0, 0.9, 0.7, 0.45);
+    else if (this.time.slowT > 0) tint.set(0.35, 0.75, 1.0, 0.4 * Math.min(1, this.time.slowT));
+    else tint.w = 0;
+    fade.set(0, 0, 0, this.dead ? Math.min(1, this.dead.t / 1.2, Math.max(0, (3.2 - this.dead.t) / 1.2)) : 0);
+    hud.veil.visible = tint.w > 0.005 || fade.w > 0.005;
+
+    // ---- the well and the gate
+    if (this.pendingUnlock && (this.pendingUnlock.t -= dt) <= 0) { this.unlock(this.pendingUnlock.gate); this.pendingUnlock = null; }
+    if (!this.transit && this.started && !this.dead) {
+      if (gateDist > 160) gate.prompted = false;
+      if (!inside && gateDist < 75 && !gate.prompted) {
+        gate.prompted = true;
+        if (!gate.open) {
+          const needs = def.needs, ch = s.charge[id];
+          const want = Object.keys(needs).filter((el) => (ch[el] || 0) < needs[el]);
+          const can = want.find((el) => s.inv[el] > 0);
+          const list = want.map((el) => `${needs[el] - (ch[el] || 0)} ${ELEMENTS[el].label}`).join(', ');
+          hud.say(`${def.name}'s well is sealed`, can ? `Cast ${ELEMENTS[can].label} at the seal: aim and ${L.cast}` : `${def.lock} Needs ${list}.`, 7, ELEMENTS[def.element].css);
+        } else hud.say(`${def.name}'s well`, 'Step in to fall to the core, where the gate hangs', 5, ELEMENTS[def.element].css);
+      }
+      if (inside) {
+        gate.toLocal(headLocal, gl);
+        const rr = Math.hypot(gl.x, gl.y - RING_Y);
+        if (Math.abs(gl.z) > 1.6) gate.lastZ = Math.sign(gl.z);
+        if (rr < 120 && !gate.corePrompt) {
+          gate.corePrompt = true;
+          if (gate.next) hud.say(s.order.length > 2 ? `Front: on to ${gate.next.planet.def.name} · Back: ${gate.prev.planet.def.name}` : `Wormhole to ${gate.next.planet.def.name}`, s.order.length > 2 ? 'Each face of the ring leads a different way round the chain' : 'Pass through the ring', 7, ELEMENTS[gate.next.element].css);
+          else hud.say('The gate is dormant', 'Break the seal on another world to give it somewhere to lead', 6);
+        }
+        const to = gate.lastZ > 0 ? gate.next : gate.prev;
+        if (to && gate.unlockT < 0 && Math.abs(gl.z) < 1.6 && rr < RING_R - 1.2) this.startTransit(gate, to, gate.lastZ > 0);
+      } else gate.corePrompt = false;
       if (alt < 400 && !s.visited[id]) {
         s.visited[id] = true;
         const n = Object.keys(s.visited).length;
@@ -280,7 +466,7 @@ export class Game {
       }
     }
 
-    // --- markers
+    // ---- markers: worlds when you are out among them; the rest only with objectives shown
     const obj = this.objective();
     camUp.set(0, 1, 0).applyQuaternion(this.camera.getWorldQuaternion(camQ));
     for (const p of this.planets) {
@@ -295,22 +481,47 @@ export class Game {
       }
       hud.setMarker(info);
     }
-    const onWorld = P.group.position.length() <= def.radius * 2.2;
-    const gm = { id: 'gate', visible: onWorld && gateDist > 75 && !this.transit };
+    const guide = hud.showObjectives && !this.transit && !inside && P.group.position.length() <= def.radius * 2.2;
+    const gm = { id: 'gate', visible: guide && gateDist > 90 };
     if (gm.visible) {
-      gm.dir = v1.copy(gate.center).addScaledVector(gate.up, 14 + gateDist * 0.03).sub(headLocal).normalize().clone();
-      gm.name = `${def.name} gate`; gm.css = ELEMENTS[def.element].css; gm.dist = gateDist;
-      gm.state = obj.goal === id ? 'goal' : gate.open ? 'open' : 'locked';
-      gm.sub = gate.open ? 'Wormhole open' : 'Sealed'; gm.aimed = false;
+      gm.dir = v1.copy(gate.site).addScaledVector(gate.up, 14 + gateDist * 0.03).sub(headLocal).normalize().clone();
+      gm.name = `${def.name} well`; gm.css = ELEMENTS[def.element].css; gm.dist = gateDist;
+      gm.state = obj.goal === id && !obj.gather ? 'goal' : gate.open ? 'open' : 'locked';
+      gm.sub = gate.open ? 'Open' : 'Sealed'; gm.aimed = false;
     }
     hud.setMarker(gm);
+    const dm = { id: 'deposit', visible: false };
+    if (guide && obj.gather && obj.goal === id) {
+      let best = null, bd = 1e9;
+      for (const d of field.deposits) { if (d.buried) continue; const q = d.pos.distanceTo(headLocal); if (q < bd) { bd = q; best = d; } }
+      if (best && bd > 60) {
+        dm.visible = true;
+        dm.dir = v1.copy(best.pos).addScaledVector(best.up, 12 + bd * 0.03).sub(headLocal).normalize().clone();
+        dm.name = `${ELEMENTS[def.element].label} deposit`; dm.css = ELEMENTS[def.element].css; dm.dist = bd; dm.state = 'goal'; dm.sub = 'Essence'; dm.aimed = false;
+      }
+    }
+    hud.setMarker(dm);
+    for (const [key, sign] of [['portalF', 1], ['portalB', -1]]) {
+      const to = sign > 0 ? gate.next : gate.prev;
+      const pm = { id: key, visible: inside && !!to && !this.transit && (s.order.length > 2 || sign > 0) };
+      if (pm.visible) {
+        gate.toLocal(headLocal, gl);
+        pm.visible = s.order.length <= 2 || Math.sign(gl.z || 1) === sign;
+        pm.dir = v1.copy(gate.center).addScaledVector(gate.up, RING_R + 4).sub(headLocal).normalize().clone();
+        pm.name = to.planet.def.name; pm.css = ELEMENTS[to.element].css; pm.dist = headLocal.length();
+        pm.state = obj.goal === to.planet.def.id ? 'goal' : 'open';
+        pm.sub = s.order.length > 2 ? (sign > 0 ? 'Onward' : 'Back') : 'Wormhole'; pm.aimed = false;
+      }
+      hud.setMarker(pm);
+    }
 
     hud.update(dt, {
       css: ELEMENTS[def.element].css, linked: s.order.length, visited: Object.keys(s.visited).length,
       objective: obj.lines, inv: s.inv, speed: player.speed, alt,
-      place: alt < def.radius * 0.6 ? `${def.name} · ${def.title}` : `Deep space · nearest world ${def.name}`,
+      place: inside ? `Inside ${def.name}` : alt < def.radius * 0.6 ? `${def.name} · ${def.title}` : `Deep space · nearest world ${def.name}`,
+      health: this.health, castEl: this.castEl, weapon: this.time.current(),
     });
-    this.audio.update(player.speed, player.thrusting, def.element, 1 - smoothstep(def.radius * 0.05, def.radius * 0.9, alt));
+    this.audio.update(player.speed, player.thrusting, def.element, inside ? 1 : 1 - smoothstep(def.radius * 0.05, def.radius * 0.9, alt));
 
     if (this.saveT > 0 && (this.saveT -= dt) <= 0) {
       try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch { /* ignore */ }

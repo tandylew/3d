@@ -22,39 +22,63 @@ Then open `http://localhost:8080/` in the Quest Browser.
 
 ## Controls
 
-| Quest Touch | Desktop | Phone / tablet | Action |
+| | Quest Touch | Desktop | Phone / tablet |
 | --- | --- | --- | --- |
-| Trigger (either hand) | Mouse look + `W` / `S` | Drag to look + **FLY** | Fly where you point or look |
-| Grip | `E` or left mouse | **GATHER** | Draw in essence orbs; release essence at a sealed gate |
-| Left stick | `A` / `D` | Left thumb stick | Walk, strafe |
-| Right stick | `Space` / `C` | **▲** / **▼** | Snap turn (VR); up / down |
-| `A` / `X` | `F` | **GATE** | Change a wormhole's destination |
+| Fly | Trigger: fly where that hand points | `F` toggles flight, then `W` flies where you look | **FLY** toggles flight, then the left stick |
+| Walk / strafe | Left stick | `W A S D` | Left stick |
+| Look / turn | Head; right stick snap-turns | Mouse | Right stick |
+| Super leap | `A` or `X` | `Space` | **LEAP** |
+| Cast your element | Right grip, aimed with that hand | Left click | **CAST** |
+| Use the time relic | Left grip, aimed with that hand | `E` or right click | **TIME** |
+| Switch relic | `B` | `Q`, wheel, `1`-`4` | **⟳** |
+| Objectives | `Y` (on the left wrist) | `H` | **◎** |
 
-On a touch screen the stick appears wherever your left thumb lands; dragging anywhere else turns the view. Render resolution adapts automatically to hold frame rate on flat screens.
+There is no gather button and no gate button: you gather essence by moving into it, and a gate's two faces decide where it leads. The objectives panel is hidden until you ask for it. A slim strip (health, essence carried, relic) appears only when something changes. Render resolution adapts to hold frame rate on flat screens.
 
-## Dev dashboard
-
-Open it with the **DEV** button (top right while playing), the **Dev dashboard** button on the title screen, the `` ` `` key, or by adding `?dev` to the URL. It works on desktop, phones and the Quest Browser's 2D page.
-
-- **Telemetry**: world, altitude, speed and speed limit, sun elevation, frame time, draw calls, triangles, terrain queue, render resolution.
-- **Warp**: pick a world, then a place: gate, essence grove, shore, summit, sunset, night side, above the clouds, low orbit, far view. Also the sun, a system overview and deep space. To judge a spot in the headset, warp there and use "enter VR from here".
-- **Control demos**: the game plays itself (take off and land, walk and hover, gather essence, unseal a gate, ride a wormhole, fly to another world) and names the control it is using on Quest, keyboard and touch.
-- **Quest**: unseal the next gate or all of them, fill or empty essence, reset.
-- **Look and flight tuning**: exposure, sun angle (lighting preview), cloud cover, render scale, flight speed constants, and toggles for clouds, atmosphere, scenery, markers and wireframe.
-- **Controls and live input**: the mapping table plus live bars for what the game is receiving.
+With flight off you walk, and sink if you are in the air. With flight on you hover and "forward" means along where you look. A super leap is about six seconds of full climb leaning the way you look: one leap from the ground reaches a few kilometres, and each further leap in the air multiplies your height. Inside a world, a leap rides you up the shaft to the wellhead.
 
 ## The game
 
-| World | Element | Gate is sealed by | Unsealed with |
+**Essence is your power.** Every world has eight essence deposits spread over the whole globe. Nothing marks them on a map; the world does: each sits in a ringed crater, the ground around it is veined with light, a pillar of light stands over it, the cloud deck opens in a clear eye above it (visible from orbit as a ring of cloud), and guardians circle it. Move into the orbs and they fly to you. You carry up to 12 of each element, and each cast spends one.
+
+**Guardians** are made of their world's element. They attack when you come near a deposit, they have health bars, and they are weak to the element that overcomes theirs (water douses fire, fire melts metal, metal cuts wood, wood breaks earth, earth dams water). When you aim at one, the element it is weak to is chosen for you if you carry it. A fallen guardian leaves a mote of its own element. If you fly away, up to six will chase you through open space under the same speed rule you fly by, and arrive a little after you do. Only a wormhole shakes them.
+
+**Health.** You have 100. After five seconds without being hit you mend quickly. At zero you are unmade: half your essence scatters and you reform at the wellhead of the world you were on.
+
+**Wells, seals and cores.** Each world's wormhole gate hangs at its very centre, in a hollow geode core. A wellhead on the surface marks the shaft down to it. Every well but Thalassa's is capped by a seal; cast the element that overcomes it at the seal to break it.
+
+| World | Element | Well is sealed by | Broken with |
 | --- | --- | --- | --- |
-| Thalassa | Water | (home gate, already open) | |
+| Thalassa | Water | (home, already open) | |
 | Pyra | Fire | an undying firestorm | 5 Water |
 | Ferrum | Metal | an iron shell | 5 Fire |
 | Sylva | Wood | iron-thorn vines | 5 Metal |
 | Petra | Earth | living stone | 5 Wood |
 | Arcana | Magic | a void seal | 2 of each of the other five |
 
-Every unsealed gate joins the wormhole network: step through a ring to arrive at another linked world instantly. Arcana needs all five elements, so the last leg is a tour of the network you built. Linking all six worlds wins. Progress saves in the browser.
+Step into an open well and the shaft carries you down (fastest mid-shaft, gentle at both ends: the flight rule, mirrored). The linked worlds form a ring in the order you opened them. A gate's **front face leads onward** round that ring and its **back face leads back**; each face glows the colour of where it leads. You step out of the far gate's back face, so the door behind you always leads back. Linking all six worlds wins. Progress saves in the browser.
+
+**Time relics.** Four worlds each hide one relic on a lone mesa ringed with hour-stones, where time already misbehaves in the relic's own way.
+
+| Relic | Form | Found on | The sign | What it does |
+| --- | --- | --- | --- | --- |
+| Stillwater Pearls | pills | Thalassa | rain hanging in the air, barely falling | **Slows** the world to a fifth for six seconds while you move normally. Three pearls, each regrows. |
+| The Rewinder | gun | Pyra | embers flying backward into the fire | **Reverses**: a guardian retraces its path home, healed and pacified (a pursuer from another world unravels entirely). It also un-falls the rubble on buried deposits. |
+| Quickening Seeds | grenade | Sylva | a tree living its whole life every few seconds | **Speeds** time where it lands: a great tree grows in a breath, its roots seize and age guardians, and spent essence nearby regrows at once. |
+| Mantle of the Held Moment | cape | Petra | a dust storm frozen in mid-air | **Freezes** the world for five seconds and leaves an echo of you behind. When time resumes the echo draws the guardians' fire and casts whenever you cast; use the mantle again to step back into it. |
+
+On worlds after Thalassa, some deposits lie buried under a collapse and need the Rewinder.
+
+## Dev dashboard
+
+Open it with the **DEV** button (top right while playing), the **Dev dashboard** button on the title screen, the `` ` `` key, or by adding `?dev` to the URL. It works on desktop, phones and the Quest Browser's 2D page.
+
+- **Telemetry**: world, altitude, speed and speed limit, sun elevation, frame time, draw calls, triangles, terrain queue, render resolution.
+- **Warp**: pick a world, then a place: wellhead, core gate, essence deposit, time anomaly, shore, summit, sunset, night side, above the clouds, low orbit, far view. Also the sun, a system overview and deep space. To judge a spot in the headset, warp there and use "enter VR from here".
+- **Control demos**: the game plays itself (take off and land; walk and super leap; gather essence; fight guardians; all four time relics; break a seal; fall to the core, pass the gate and ride back up; fly to another world) and names the control it is using on Quest, keyboard and touch.
+- **Quest**: unseal the next gate or all of them, fill or empty essence, give all relics, summon guardians, heal or take damage, reset.
+- **Look and flight tuning**: exposure, sun angle (lighting preview), cloud cover, render scale, flight speed constants, and toggles for clouds, atmosphere, scenery, markers and wireframe.
+- **Controls and live input**: the mapping table plus live bars for what the game is receiving.
 
 ## How the main pieces work
 
@@ -85,14 +109,16 @@ src/terrainWorker.js  patch mesh generation
 src/cubesphere.js     cube-sphere mapping shared with the worker
 src/shaders.js        all GLSL
 src/sky.js            nebula, stars, sun, cloud noise bake
-src/gates.js          wormhole gates and their seals
-src/essence.js        essence orbs
+src/gates.js          wellheads, seals and the core gates
+src/essence.js        essence deposits
 src/props.js          per-world scenery
 src/hud.js            wrist display, prompts, world markers
 src/fx.js             speed streaks, wormhole tunnel
 src/audio.js          synthesised sound
 src/touch.js          on-screen stick and buttons
 src/dev.js            developer dashboard: warps, demos, tuning
+src/combat.js         guardians, bolts, pursuit
+src/timeworks.js      time relics and their anomalies
 vendor/               three.js r170 (MIT)
 tools/                dev server and tests
 ```
@@ -101,17 +127,18 @@ tools/                dev server and tests
 
 ```sh
 npm install        # only needed for the tests (XR emulator)
-npm test           # scripted playthrough: gather, fly, unseal, wormhole, win
+npm test           # scripted playthrough: gather, fight, leap, pursuit, seals, cores, wormholes, relics, death, win
 npm run test:xr    # same game inside an emulated Quest 3 WebXR session
-npm run test:ui    # phone touch controls, every dashboard warp, all control demos
+npm run test:ui    # twin-stick touch controls, every dashboard warp, all control demos
 ```
 
 All three run the real game in headless Chromium (Playwright must be available). `test:xr` uses IWER, Meta's WebXR emulator, to exercise session start, stereo rendering and Touch controller input.
 
-## Known limits of this MVP
+## Known limits
 
-- Worlds do not rotate or orbit, so each gate sits in permanent daylight.
-- You hover over liquids rather than swim; there are no hazards or enemies.
+- Worlds do not rotate or orbit, so each wellhead sits in permanent daylight.
+- You hover over liquids rather than swim.
+- Guardians are one behaviour (circle, chase, shoot) in six elemental bodies; there are no bosses.
 - Clouds cast shadows; terrain and scenery do not shadow each other. Clouds are a single thin layer, so flying through it shows no volume.
 - The dev dashboard is a 2D page overlay and is not visible inside VR; warp first, then enter VR.
 - Not yet profiled on a physical headset. If frame rate dips, try the dashboard toggles first (clouds, scenery), then lower `MAX_LEVEL` or `GRID` in `src/planet.js` / `src/cubesphere.js`.

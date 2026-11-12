@@ -23,42 +23,58 @@ const watch = (page) => { page.on('console', (m) => { if (m.type() === 'error') 
   check('phone: play button says Play', (await page.textContent('#enter-desktop')) === 'Play');
   await page.tap('#enter-desktop');
   await page.waitForTimeout(1500);
-  check('phone: touch controls shown', await page.isVisible('.t-fly') && await page.isVisible('#t-base'));
-  const state = () => page.evaluate(() => { const { input, game } = window.worml; return { trig: input.right.trigger, grip: input.right.grip, mx: input.move.x, my: input.move.y, lift: input.lift, yaw: input.yaw, alt: game.player.alt, speed: game.player.speed }; });
-  const hold = async (sel, fn) => {
-    const box = await page.locator(sel).boundingBox(), x = box.x + box.width / 2, y = box.y + box.height / 2;
-    const cdp = await ctx.newCDPSession(page);
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 7 }] });
-    await page.waitForTimeout(1500);
-    const r = await fn();
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await page.waitForTimeout(1200);
-    return r;
-  };
-  let s = await hold('.t-fly', state);
-  check('phone: FLY button thrusts', s.trig === 1 && s.speed > 1, `trigger=${s.trig} speed=${s.speed.toFixed(1)}`);
-  s = await hold('.t-grip', state);
-  check('phone: GATHER button grips', s.grip === 1);
-  s = await hold('.t-up', state);
-  check('phone: ▲ lifts', s.lift === 1);
+  check('phone: twin sticks and action buttons shown', await page.isVisible('#t-left') && await page.isVisible('#t-right') && await page.isVisible('.t-cast') && await page.isVisible('.t-jump') && await page.isVisible('.t-fly'));
+  check('phone: no Gather or Gate buttons, relic button hidden until one is owned', (await page.$$('.t-grip, .t-act, .t-up, .t-down')).length === 0 && !(await page.isVisible('.t-time')));
+  check('phone: objectives hidden by default', await page.evaluate(() => !window.worml.game.hud.wrist.mesh.visible));
+  const state = () => page.evaluate(() => { const { input, game } = window.worml; return { trig: input.right.trigger, cast: input.cast, mx: input.move.x, my: input.move.y, fly: input.flyMode, yaw: input.yaw, alt: game.player.alt, speed: game.player.speed, leaping: game.player.leaping }; });
+  const cdp = await ctx.newCDPSession(page), vp = page.viewportSize();
+  const centre = async (sel) => { const box = await page.locator(sel).boundingBox(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; };
+  const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts });
+  const tap = async (sel) => { const c = await centre(sel); await touch('touchStart', [{ ...c, id: 9 }]); await page.waitForTimeout(120); await touch('touchEnd', []); await page.waitForTimeout(1200); };
+  // CAST is a hold button
+  let c = await centre('.t-cast');
+  await touch('touchStart', [{ ...c, id: 7 }]); await page.waitForTimeout(1500);
+  let s = await state();
+  await touch('touchEnd', []); await page.waitForTimeout(1200);
+  check('phone: CAST holds, then releases', s.cast === true && (await state()).cast === false);
+  // left stick walks, right stick looks: both thumbs at once
+  const yaw0 = s.yaw, lx = 110, ly = vp.height - 100, rx = vp.width - 110, ry = vp.height - 100;
+  await touch('touchStart', [{ x: lx, y: ly, id: 1 }]);
+  await touch('touchStart', [{ x: lx, y: ly, id: 1 }, { x: rx, y: ry, id: 2 }]);
+  for (let i = 1; i <= 6; i++) await touch('touchMove', [{ x: lx, y: ly - i * 10, id: 1 }, { x: rx + i * 10, y: ry, id: 2 }]);
+  await page.waitForTimeout(2500);
   s = await state();
-  check('phone: buttons release', s.trig === 0 && s.grip === 0 && s.lift === 0);
-  // stick + look, with two fingers at once
-  const cdp = await ctx.newCDPSession(page), vp = page.viewportSize(), yaw0 = s.yaw;
-  const sx = 110, sy = vp.height - 100, lx = vp.width * 0.6, ly = vp.height * 0.4;
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: sx, y: sy, id: 1 }] });
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: sx, y: sy, id: 1 }, { x: lx, y: ly, id: 2 }] });
-  for (let i = 1; i <= 6; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: sx, y: sy - i * 10, id: 1 }, { x: lx + i * 20, y: ly, id: 2 }] });
-  await page.waitForTimeout(700);
-  s = await state();
-  check('phone: stick walks forward', s.my > 0.8 && Math.abs(s.mx) < 0.2, `move=(${s.mx.toFixed(2)}, ${s.my.toFixed(2)})`);
-  check('phone: dragging turns the view', Math.abs(s.yaw - yaw0) > 0.2, `yaw ${yaw0.toFixed(2)} -> ${s.yaw.toFixed(2)}`);
+  check('phone: left stick walks forward', s.my > 0.8 && Math.abs(s.mx) < 0.2 && s.trig === 0, `move=(${s.mx.toFixed(2)}, ${s.my.toFixed(2)})`);
+  check('phone: right stick turns the view', Math.abs(s.yaw - yaw0) > 0.2, `yaw ${yaw0.toFixed(2)} -> ${s.yaw.toFixed(2)}`);
   await page.screenshot({ path: 'shots/ui-phone.png' });
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await page.waitForTimeout(300);
+  // FLY is a toggle: with it on, the same stick flies where you look
+  await touch('touchEnd', []); await page.waitForTimeout(800);
+  await tap('.t-fly');
+  check('phone: FLY toggles flight on', (await state()).fly === true && await page.evaluate(() => document.querySelector('.t-fly').classList.contains('on')));
+  await touch('touchStart', [{ x: lx, y: ly, id: 1 }]);
+  for (let i = 1; i <= 6; i++) await touch('touchMove', [{ x: lx, y: ly - i * 10, id: 1 }]);
+  await page.waitForTimeout(1500);
   s = await state();
-  check('phone: stick recentres', s.mx === 0 && s.my === 0);
-  check('phone: prompts name touch controls', await page.evaluate(() => window.worml.game.labels().grip === 'GATHER'));
+  check('phone: with flight on the stick flies', s.trig > 0.8 && s.my === 0, `trigger=${s.trig.toFixed(2)}`);
+  await touch('touchEnd', []); await page.waitForTimeout(1200);
+  s = await state();
+  check('phone: sticks recentre', s.mx === 0 && s.my === 0 && s.trig === 0);
+  await tap('.t-fly');
+  check('phone: FLY toggles off again', (await state()).fly === false);
+  const a0 = (await state()).alt;
+  await tap('.t-jump');
+  await page.waitForFunction((a) => window.worml.game.player.alt > a + 40, a0, { timeout: 90000 }).catch(() => {});
+  s = await state();
+  check('phone: LEAP launches a super jump', s.alt > a0 + 40, `alt ${a0.toFixed(0)} -> ${s.alt.toFixed(0)} m`);
+  check('phone: prompts name touch controls', await page.evaluate(() => window.worml.game.labels().cast === 'CAST'));
+  await page.evaluate(() => { const g = window.worml.game; g.grant(5); g.time.give('pearls'); });
+  await page.waitForTimeout(1500);
+  check('phone: TIME button appears once a relic is owned', await page.isVisible('.t-time') && (await page.textContent('.t-time')) === 'SLOW');
+  await tap('.t-time');
+  check('phone: TIME uses the relic', await page.evaluate(() => window.worml.game.time.slowT > 0));
+  await page.tap('#btn-hud'); await page.waitForTimeout(1500);
+  check('phone: ◎ shows the objectives', await page.evaluate(() => window.worml.game.hud.wrist.mesh.visible));
+  await page.screenshot({ path: 'shots/ui-phone-hud.png' });
   await page.tap('#btn-dev');
   await page.waitForTimeout(500);
   check('phone: dashboard opens', await page.isVisible('#dev'));
@@ -106,7 +122,7 @@ const watch = (page) => { page.on('console', (m) => { if (m.type() === 'error') 
   }
   check(`desktop: ${worlds.length * places.length} warps land cleanly`, bad.length === 0, bad.join(' '));
   // a look at a few
-  for (const [w, pl, wait] of [['petra', 'peak', 9000], ['pyra', 'shore', 9000], ['arcana', 'gate', 9000], ['ferrum', 'orbit', 7000], ['sylva', 'sunset', 9000]]) {
+  for (const [w, pl, wait] of [['thalassa', 'deposit', 10000], ['thalassa', 'anomaly', 10000], ['thalassa', 'core', 8000], ['pyra', 'deposit', 10000], ['pyra', 'anomaly', 10000], ['sylva', 'anomaly', 10000], ['petra', 'anomaly', 10000], ['ferrum', 'orbit', 8000], ['arcana', 'gate', 9000]]) {
     await page.click(`[data-world="${w}"]`); await page.click(`[data-place="${pl}"]`);
     await page.waitForTimeout(wait);
     await page.screenshot({ path: `shots/ui-${w}-${pl}.png` });
@@ -138,17 +154,19 @@ const watch = (page) => { page.on('console', (m) => { if (m.type() === 'error') 
       let sec = 0, caps = new Set();
       while (dev.demo && sec < maxSec) { t += DT; sec += DT; dev.update(DT); g.frame(DT, t); caps.add(document.querySelector('#demo-banner b')?.textContent); }
       const p = g.player;
-      out[name] = { sec: Math.round(sec), done: !dev.demo, caps: caps.size, planet: p.planet.def.id, alt: Math.round(p.alt), water: g.state.inv.water, open: g.state.order.join('>') };
+      out[name] = { sec: Math.round(sec), done: !dev.demo, caps: caps.size, planet: p.planet.def.id, alt: Math.round(p.alt), inside: p.inside, water: g.state.inv.water, open: g.state.order.join('>'), health: Math.round(g.health), foes: g.combat.hunting };
       dev.stopDemo();
     };
-    run('walk', 40); run('gather', 120); run('flight', 150); run('unseal', 60); run('transit', 80); run('travel', 400);
+    run('walk', 120); run('gather', 160); run('fight', 90); run('relics', 90); run('flight', 150); run('unseal', 60); run('transit', 160); run('travel', 400);
     return out;
   });
-  check('demo: walk completes', demo.walk.done, JSON.stringify(demo.walk));
+  check('demo: walk and leap completes', demo.walk.done && demo.walk.alt < 5, JSON.stringify(demo.walk));
   check('demo: gather collects essence', demo.gather.done && demo.gather.water >= 2, JSON.stringify(demo.gather));
+  check('demo: fight clears the guardians', demo.fight.done && demo.fight.foes === 0, JSON.stringify(demo.fight));
+  check('demo: relics runs through all four', demo.relics.done && demo.relics.caps >= 6, JSON.stringify(demo.relics));
   check('demo: flight returns to the ground', demo.flight.done && demo.flight.alt < 60, JSON.stringify(demo.flight));
   check('demo: unseal opens Pyra', demo.unseal.done && demo.unseal.open.includes('pyra'), JSON.stringify(demo.unseal));
-  check('demo: transit changes world', demo.transit.done && demo.transit.planet !== 'thalassa', JSON.stringify(demo.transit));
+  check('demo: transit goes core to core and back up', demo.transit.done && demo.transit.planet === 'pyra' && !demo.transit.inside, JSON.stringify(demo.transit));
   check('demo: travel lands on another world', demo.travel.done && demo.travel.alt < 80, JSON.stringify(demo.travel));
   await page.close();
 }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Input } from './input.js';
 import { Audio } from './audio.js';
-import { Game } from './game.js';
+import { Game, SAVE_KEY } from './game.js';
 import { TouchControls } from './touch.js';
 import { Dev } from './dev.js';
 
@@ -56,7 +56,7 @@ fit();
 
 const input = new Input(renderer, rig, camera, renderer.domElement);
 const audio = new Audio();
-if (params.has('reset')) { try { localStorage.removeItem('worml-save-v1'); } catch { /* ignore */ } }
+if (params.has('reset')) { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } }
 const game = new Game({ renderer, scene, rig, camera, input, audio });
 
 // ---------------------------------------------------------------- front end
@@ -119,6 +119,7 @@ deskBtn.addEventListener('click', () => enterFlat(true));
 devBtn.addEventListener('click', () => dev.open());
 $('btn-dev').addEventListener('click', () => dev.toggle());
 $('btn-menu').addEventListener('click', showOverlay);
+$('btn-hud').addEventListener('click', () => game.hud.toggleObjectives());
 $('reset').addEventListener('click', () => { game.reset(); status.textContent = 'Progress reset.'; });
 if (coarse) deskBtn.textContent = 'Play';
 
@@ -140,6 +141,7 @@ renderer.setAnimationLoop(() => {
   dev.update(dt);
   game.frame(dt, time);
   if (playing) quality.frame(dt);
+  if (touch.enabled) touch.sync(game.uiState());
   renderer.render(scene, camera);
 
   if (!ready) {

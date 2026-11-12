@@ -8,21 +8,22 @@ import { fmtDist, fmtSpeed } from './hud.js';
 import { mulberry32 } from './noise.js';
 
 const PLACES = [
-  ['gate', 'Gate'], ['grove', 'Essence grove'], ['shore', 'Shore'], ['peak', 'Summit'], ['sunset', 'Sunset'],
-  ['night', 'Night side'], ['clouds', 'Above clouds'], ['orbit', 'Low orbit'], ['far', 'Far view'],
+  ['gate', 'Wellhead'], ['core', 'Core gate'], ['deposit', 'Essence deposit'], ['anomaly', 'Time anomaly'], ['shore', 'Shore'], ['peak', 'Summit'],
+  ['sunset', 'Sunset'], ['night', 'Night side'], ['clouds', 'Above clouds'], ['orbit', 'Low orbit'], ['far', 'Far view'],
 ];
 const CTRL = {
-  fly: { vr: 'Point a hand + Trigger', key: 'Mouse look + W', touch: 'Drag to look + FLY', hl: ['fly'] },
-  brake: { vr: 'Release Trigger', key: 'Release W', touch: 'Release FLY', hl: [] },
-  grip: { vr: 'Grip', key: 'E or left mouse', touch: 'GATHER', hl: ['grip'] },
-  move: { vr: 'Left stick', key: 'A / D to strafe', touch: 'Left thumb stick', hl: ['stick'] },
-  lift: { vr: 'Right stick up / down', key: 'Space / C', touch: '▲ / ▼', hl: ['up', 'down'] },
-  act: { vr: 'A or X', key: 'F', touch: 'GATE', hl: ['act'] },
+  fly: { vr: 'Point a hand + Trigger', key: 'F for flight, then W', touch: 'FLY on, then left stick', hl: ['fly', 'stick'] },
+  brake: { vr: 'Release Trigger', key: 'Release W', touch: 'Release the stick', hl: [] },
+  move: { vr: 'Left stick', key: 'W A S D', touch: 'Left stick (right stick looks)', hl: ['stick', 'look'] },
+  jump: { vr: 'A or X', key: 'Space', touch: 'LEAP', hl: ['jump'] },
+  land: { vr: 'Release below 500 m', key: 'F for flight off', touch: 'FLY off', hl: ['fly'] },
+  cast: { vr: 'Right grip, aim the hand', key: 'Left click', touch: 'CAST', hl: ['cast'] },
+  time: { vr: 'Left grip (B switches relic)', key: 'E (Q switches relic)', touch: 'TIME (⟳ switches relic)', hl: ['time'] },
   none: null,
 };
 const DEMOS = [
-  ['flight', 'Take off, cruise, land'], ['walk', 'Walk, strafe, hover'], ['gather', 'Gather essence'],
-  ['unseal', 'Unseal a gate'], ['transit', 'Ride a wormhole'], ['travel', 'Fly to another world'],
+  ['flight', 'Take off, cruise, land'], ['walk', 'Walk, strafe, super leap'], ['gather', 'Gather essence'], ['fight', 'Fight guardians'],
+  ['relics', 'The four time relics'], ['unseal', 'Break a seal'], ['transit', 'Core, gate, and back up'], ['travel', 'Fly to another world'],
 ];
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), q1 = new THREE.Quaternion();
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -68,6 +69,8 @@ export class Dev {
         <div class="grid two">
           <button data-quest="next">Unseal next gate</button><button data-quest="all">Unseal all gates</button>
           <button data-quest="give">Fill essence</button><button data-quest="empty">Empty essence</button>
+          <button data-quest="relics">Give all relics</button><button data-quest="foes">Summon guardians</button>
+          <button data-quest="heal">Heal</button><button data-quest="hurt">Take 40 damage</button>
           <button data-quest="reset">Reset progress</button>
         </div>
       </details>
@@ -87,12 +90,14 @@ export class Dev {
       <details><summary>Controls &amp; live input</summary>
         <table class="ctl">
           <tr><th></th><th>Quest</th><th>Keyboard</th><th>Touch</th></tr>
-          <tr><td>Fly</td><td>Trigger, aim hand</td><td>W / S, mouse</td><td>FLY, drag view</td></tr>
-          <tr><td>Walk</td><td>Left stick</td><td>A / D</td><td>Left stick</td></tr>
-          <tr><td>Up / down</td><td>Right stick</td><td>Space / C</td><td>▲ ▼</td></tr>
-          <tr><td>Turn</td><td>Right stick snap</td><td>Mouse</td><td>Drag view</td></tr>
-          <tr><td>Gather / release</td><td>Grip</td><td>E, click</td><td>GATHER</td></tr>
-          <tr><td>Destination</td><td>A / X</td><td>F</td><td>GATE</td></tr>
+          <tr><td>Fly</td><td>Trigger, aim hand</td><td>F toggles, W</td><td>FLY toggles, left stick</td></tr>
+          <tr><td>Walk</td><td>Left stick</td><td>W A S D</td><td>Left stick</td></tr>
+          <tr><td>Look / turn</td><td>Head, right stick</td><td>Mouse</td><td>Right stick</td></tr>
+          <tr><td>Super leap</td><td>A / X</td><td>Space</td><td>LEAP</td></tr>
+          <tr><td>Cast element</td><td>Right grip</td><td>Click</td><td>CAST</td></tr>
+          <tr><td>Time relic</td><td>Left grip</td><td>E</td><td>TIME</td></tr>
+          <tr><td>Switch relic</td><td>B</td><td>Q, 1-4</td><td>⟳</td></tr>
+          <tr><td>Objectives</td><td>Y</td><td>H</td><td>◎</td></tr>
         </table>
         <div id="dv-input" class="bars"></div>
       </details>`;
@@ -228,10 +233,19 @@ export class Dev {
       return best.d;
     };
     switch (kind) {
-      case 'gate': g.warpTo(id, 0, 27); break;
-      case 'grove': {
-        const o = g.fields.get(id).orbs[14 + 3];
-        pl.place(planet, o.up.clone().addScaledVector(gate.x, 9 / R), 0, gate.x.clone().negate());
+      case 'gate': g.warpTo(id, 0, 36); break;
+      case 'core':
+        if (!g.warpCore(id)) { g.warpTo(id, 0, 36); g.hud.say(`${def.name}'s well is sealed`, 'Quest → Unseal next gate opens it', 4); }
+        break;
+      case 'deposit': {
+        const d = g.fields.get(id).deposits[0];
+        pl.place(planet, d.up.clone().addScaledVector(gate.x, 60 / R), 0, gate.x.clone().negate());
+        break;
+      }
+      case 'anomaly': {
+        const a = def.anomaly;
+        if (!a) { g.warpTo(id, 0, 36); g.hud.say(`No time anomaly on ${def.name}`, 'Thalassa, Pyra, Sylva and Petra each hold one', 4); break; }
+        pl.place(planet, new THREE.Vector3(a.x, a.y, a.z).addScaledVector(gate.x, 26 / R), 0, gate.x.clone().negate());
         break;
       }
       case 'peak': { const s = this.scan(planet).peak; pl.place(planet, s.d, 1, v1.crossVectors(s.d, sun).clone()); input.pitch = -0.25; break; }
@@ -260,6 +274,8 @@ export class Dev {
       }
     }
     pl.grounded = false;
+    input.flyMode = kind === 'clouds' || kind === 'orbit';      // arrive hovering when the place is in the air
+    g.combat.dropPursuit();
   }
 
   quest(k) {
@@ -270,6 +286,23 @@ export class Dev {
     else if (k === 'give') g.grant(9);
     else if (k === 'empty') g.grant(0);
     else if (k === 'reset') { g.reset(); this.warp('thalassa', 'gate'); }
+    else if (k === 'relics') { for (const w of ['pearls', 'rewinder', 'seeds', 'mantle']) g.time.give(w); }
+    else if (k === 'foes') this.summon(3);
+    else if (k === 'heal') g.health = 100;
+    else if (k === 'hurt') g.hurt(40);
+  }
+
+  // Bring the nearest idle guardians of this world to the player, angry.
+  summon(n) {
+    const g = this.game, c = g.combat, up = g.player.up;
+    const list = c.enemies.filter((e) => e.state === 'idle' && !e.foreign).sort((a, b) => a.pos.distanceTo(g.headSolar) - b.pos.distanceTo(g.headSolar)).slice(0, n);
+    const t = new THREE.Vector3().crossVectors(up, new THREE.Vector3(0.3, 0.9, 0.1)).normalize(), b = new THREE.Vector3().crossVectors(up, t);
+    list.forEach((e, i) => {
+      const a = (i / n) * Math.PI * 2;
+      e.pos.copy(g.headSolar).addScaledVector(t, Math.cos(a) * 32).addScaledVector(b, Math.sin(a) * 32).addScaledVector(up, 5);
+      e.state = 'chase'; e.pacify = 0; e.hp = e.max; e.hist.length = 0;
+    });
+    return list;
   }
 
   // --------------------------------------------------------------- demos
@@ -288,13 +321,13 @@ export class Dev {
     if (this.game.transit) return;
     this.stopDemo();
     this.hooks.play();
-    this.dbg = this.input.debug = { trigger: 0, grip: 0, dir: new THREE.Vector3(0, 0, -1), move: new THREE.Vector2(), lift: 0 };
+    this.dbg = this.input.debug = { trigger: 0, cast: false, dir: new THREE.Vector3(0, 0, -1), move: new THREE.Vector2(), lift: 0, fly: true };
     this.demo = this['demo_' + name]();
   }
 
   stopDemo() {
     if (!this.demo) return;
-    this.demo = null; this.input.debug = null;
+    this.demo = null; this.input.debug = null; this.input.flyMode = false;
     this.banner.hidden = true;
     this.touch?.highlight([]);
   }
@@ -324,15 +357,23 @@ export class Dev {
       // skim round a world instead of pushing into the ground when the goal is over the horizon
       const inward = dir.dot(p.up), R = p.planet.def.radius;
       if (inward < 0 && p.alt < R * 0.4 && target.length() > R * 0.5) dir.addScaledVector(p.up, -inward).normalize();
-      this.aim(dir); d.trigger = 1; d.grip = grip;
+      this.aim(dir); d.trigger = 1;
       yield;
     }
     d.trigger = 0;
   }
 
+  nearestFoe() {
+    const g = this.game; let best = null, bd = 1e9;
+    for (const e of g.combat.enemies) { if (e.state !== 'chase' && e.state !== 'pursue') continue; const d = e.pos.distanceTo(g.headSolar); if (d < bd) { bd = d; best = e; } }
+    return best;
+  }
+
+  aimAt(solar) { const g = this.game; this.aim(v2.copy(solar).sub(g.player.pos).sub(g.input.right.pos)); }
+
   *demo_flight() {
     const g = this.game, p = g.player, d = this.dbg, gate = g.gates.get(p.planet.def.id), planet = p.planet;
-    this.cap('Take off', 'Look where you want to go and hold the fly control', 'fly');
+    this.cap('Take off', 'Turn flight on, then push forward: you fly where you look', 'fly');
     const fwd = new THREE.Vector3();
     for (let t = 0; t < 14 && p.alt < 1500; t += this.dt) {
       g.camera.getWorldDirection(fwd); fwd.addScaledVector(p.up, -fwd.dot(p.up)).normalize();
@@ -340,75 +381,141 @@ export class Dev {
     }
     this.cap('Speed grows with altitude', `${FLIGHT.V0} m/s at the ground, plus ${FLIGHT.RATE} m/s for every metre of height. Now ${fmtSpeed(p.speed)}.`, 'fly');
     for (let t = 0; t < 9 && p.alt < 20000; t += this.dt) { this.aim(v2.copy(p.up)); d.trigger = 1; yield; }
-    this.cap('Let go to brake', 'Release and you coast to a stop in a couple of seconds, at any speed', 'brake');
+    this.cap('Let go to brake', 'Release and you coast to a stop in a couple of seconds, at any speed. With flight on you hover.', 'brake');
     d.trigger = 0; yield* this.wait(3);
     this.cap('Descend', 'Aim at the ground. The limit shrinks as you approach, so arrival is always gentle', 'fly');
-    yield* this.flyTo(planet, gate.frontDir(40).multiplyScalar(planet.def.radius + gate.base.length() - planet.def.radius + 3), 14, 40);
-    this.cap('Touch down', 'Near the ground, release and gravity sets you on your feet', 'brake');
-    yield* this.wait(4);
+    yield* this.flyTo(planet, gate.frontDir(44).multiplyScalar(gate.site.length() + 3), 14, 40);
+    this.cap('Touch down', 'Turn flight off and you settle on your feet', 'land');
+    d.fly = false; yield* this.wait(4);
     this.stopDemo();
   }
 
   *demo_walk() {
-    const d = this.dbg;
-    this.cap('Walk', 'The stick moves you relative to where you look', 'move');
+    const g = this.game, p = g.player, d = this.dbg;
+    d.fly = false;
+    this.cap('Walk', 'One stick moves you, the other (or the mouse, or your head) looks', 'move');
     d.move.set(0, 1); yield* this.wait(3);
     this.cap('Strafe', 'Sideways, without turning', 'move');
     d.move.set(1, 0); yield* this.wait(2); d.move.set(-1, 0); yield* this.wait(2); d.move.set(0, 0);
-    this.cap('Rise', 'Straight up without aiming: good for hopping over a ridge', 'lift');
-    d.lift = 1; yield* this.wait(2.5);
-    this.cap('Sink', 'And back down. Let go and you settle on the ground', 'lift');
-    d.lift = -1; yield* this.wait(2); d.lift = 0; yield* this.wait(2.5);
+    this.cap('Super leap', 'A giant jump into the sky, leaning the way you look', 'jump');
+    d.jump = true; yield;
+    for (let t = 0; t < 8 && (p.leaping || t < 1); t += this.dt) { this.cap('Super leap', `${fmtDist(Math.max(0, p.alt))} up and climbing. Leap again in the air to go higher still.`, 'jump'); yield; }
+    this.cap('Hover, then come down', 'You arrive with flight on. Switch it off to sink back: the fall eases as the ground nears.', 'land');
+    yield* this.wait(2.5);
+    d.fly = false;
+    for (let t = 0; t < 40 && !p.grounded; t += this.dt) yield;
+    yield* this.wait(1.5);
     this.stopDemo();
   }
 
   *demo_gather() {
-    const g = this.game, p = g.player, d = this.dbg, def = p.planet.def, field = g.fields.get(def.id), el = ELEMENTS[def.element];
-    if (g.state.inv[def.element] > 5) g.state.inv[def.element] = 5;
-    this.cap(`Gather ${el.label} essence`, 'Fly near the glowing orbs and hold the gather control to draw them in', 'grip');
-    yield* this.wait(1.5);
-    for (let n = 0; n < 3; n++) {
-      const here = p.pos.clone().sub(p.planet.pos).sub(field.anchor);
-      const o = field.orbs.filter((q) => q.state === 0).sort((a, b) => a.home.distanceTo(here) - b.home.distanceTo(here))[0];
+    const g = this.game, p = g.player, def = p.planet.def, field = g.fields.get(def.id), el = ELEMENTS[def.element];
+    if (g.state.inv[def.element] > 6) g.state.inv[def.element] = 6;
+    const near = field.nearest(p.pos.clone().sub(p.planet.pos)), dep = near.dist < 3000 && !near.dep.buried ? near.dep : field.deposits[0];
+    this.cap(`Find ${el.label} essence`, 'A deposit: a ringed crater under a pillar of light, where the clouds have parted', 'fly');
+    yield* this.flyTo(p.planet, dep.pos.clone().addScaledVector(dep.up, 30), 45, 60);
+    for (let n = 0; n < 4; n++) {
+      const here = p.pos.clone().sub(p.planet.pos);
+      const o = dep.orbs.filter((q) => q.state === 0).map((q) => q.pos.clone().applyMatrix4(dep.g.matrix)).sort((a, b) => a.distanceTo(here) - b.distanceTo(here))[0];
       if (!o) break;
-      const before = g.state.inv[def.element];
-      yield* this.flyTo(p.planet, o.home.clone().add(field.anchor), 6, 25, 1);
-      d.grip = 1;
-      for (let t = 0; t < 2.5 && g.state.inv[def.element] === before; t += this.dt) yield;
-      this.cap(`${g.state.inv[def.element]} ${el.label} essence carried`, 'Orbs within 18 m fly to your hand. Touching one works too', 'grip');
+      this.cap(`Gather ${el.label} essence`, 'No button: move into the orbs and they fly to you', 'fly');
+      yield* this.flyTo(p.planet, o, 4, 20);
+      yield* this.wait(0.8);
+      this.cap(`${g.state.inv[def.element]} ${el.label} essence`, 'It is now your power: every cast spends one', 'none');
     }
-    d.grip = 0; yield* this.wait(2.5);
+    yield* this.wait(2.5);
+    this.stopDemo();
+  }
+
+  *demo_fight() {
+    const g = this.game, d = this.dbg;
+    g.grant(9); g.health = 100;
+    const foes = this.summon(3);
+    if (!foes.length) { this.cap('No guardians near', 'Warp to an essence deposit first'); yield* this.wait(3); this.stopDemo(); return; }
+    this.cap('Guardians', 'They gather at deposits and attack when you come close. The demo has filled your essence.', 'none');
+    yield* this.wait(2.5);
+    for (let t = 0; t < 40; t += this.dt) {
+      const e = this.nearestFoe(); if (!e) break;
+      this.aimAt(e.pos); d.cast = true;
+      const el = g.castEl;
+      this.cap('Cast your element', el ? `${ELEMENTS[el].label} is chosen for you: what the target is weak to, if you carry it. Health ${Math.round(g.health)}` : 'Out of essence', 'cast');
+      yield;
+    }
+    d.cast = false;
+    this.cap('Essence freed', 'A fallen guardian leaves essence of its own element. Hurt mends after five quiet seconds.', 'none');
+    yield* this.wait(5);
+    this.stopDemo();
+  }
+
+  *demo_relics() {
+    const g = this.game, p = g.player, d = this.dbg, tw = g.time;
+    for (const w of ['pearls', 'rewinder', 'seeds', 'mantle']) g.state.weapons[w] = true;
+    g.grant(9); g.health = 100; tw.pearls.n = 3; tw.seeds.n = 2; tw.cool.rewinder = tw.cool.mantle = 0;
+    this.summon(4);
+    this.cap('Four relics, four ways to bend time', 'Each is found at an anomaly on its own world. The demo has lent you all four.', 'none');
+    yield* this.wait(3);
+    g.state.sel = 'pearls'; d.time = true;
+    this.cap('Stillwater Pearls: slow', 'Swallow one when you are bombarded. The world crawls; you do not.', 'time');
+    for (let t = 0; t < 5; t += this.dt) { const e = this.nearestFoe(); if (e) { this.aimAt(e.pos); d.cast = true; } yield; }
+    d.cast = false;
+    g.state.sel = 'rewinder';
+    this.cap('The Rewinder: reverse', 'Shoot a guardian and it retraces its path home. It also un-falls collapsed rock.', 'time');
+    for (let t = 0; t < 3; t += this.dt) { const e = this.nearestFoe(); if (e) this.aimAt(e.pos); if (t > 1.2 && e && tw.cool.rewinder <= 0) d.time = true; yield; }
+    g.state.sel = 'seeds';
+    this.cap('Quickening Seeds: speed up', 'Throw one: a tree lives its whole life in a breath, its roots seize foes and spent essence regrows.', 'time');
+    for (let t = 0; t < 1.5; t += this.dt) { const e = this.nearestFoe(); this.aimAt(e ? e.pos : v1.copy(g.headSolar).addScaledVector(p.up, -1)); yield; }
+    d.time = true; yield* this.wait(5);
+    g.state.sel = 'mantle'; d.time = true;
+    this.cap('Mantle of the Held Moment: freeze', 'Time stops and an echo of you stays behind. Walk away: you are in two places at once.', 'time');
+    d.fly = true; d.move.set(0.6, -1); yield* this.wait(4); d.move.set(0, 0);
+    this.cap('Two places at once', 'Guardians attack the echo, and it casts whenever you cast', 'cast');
+    for (let t = 0; t < 4; t += this.dt) { const e = this.nearestFoe(); if (e) { this.aimAt(e.pos); d.cast = true; } yield; }
+    d.cast = false;
+    this.cap('Step back into the echo', 'Use the mantle again and you are where you were', 'time');
+    d.time = true; yield* this.wait(3.5);
     this.stopDemo();
   }
 
   *demo_unseal() {
     const g = this.game, d = this.dbg, gate = g.nextSealed();
-    if (!gate) { this.cap('Every gate is already open', 'Use Quest → Reset progress to seal them again'); yield* this.wait(4); this.stopDemo(); return; }
+    if (!gate) { this.cap('Every well is already open', 'Use Quest → Reset progress to seal them again'); yield* this.wait(4); this.stopDemo(); return; }
     const def = gate.planet.def;
     g.grantFor(gate);
-    g.warpTo(def.id, 0, 30);
-    this.cap(`${def.name} gate is sealed`, def.lock + ' (the demo has granted the essence it needs)');
+    g.warpTo(def.id, 0, 46);
+    this.cap(`${def.name}'s well is sealed`, def.lock + ' (the demo has granted the essence it needs)');
     yield* this.wait(4);
-    this.cap('Release essence into the gate', 'Stand beside it and hold the gather control', 'grip');
-    for (let t = 0; t < 14 && !gate.open; t += this.dt) { d.grip = 1; yield; }
-    d.grip = 0;
-    this.cap(`${def.name} wormhole established`, 'The gate now links to every other open gate');
+    this.cap('Cast at the seal', 'Aim at it: the element it needs is chosen for you', 'cast');
+    for (let t = 0; t < 16 && !gate.open; t += this.dt) { this.aimAt(v1.copy(gate.planet.pos).add(gate.site).addScaledVector(gate.up, 3)); d.cast = t > 1; yield; }
+    d.cast = false;
+    this.cap(`${def.name}'s well is open`, 'The seal is gone and the shaft drops to the core, where the gate hangs');
     yield* this.wait(5);
     this.stopDemo();
   }
 
   *demo_transit() {
-    const g = this.game, p = g.player, s = g.state;
-    if (s.order.length < 2) { g.unlockNext(); this.cap('Opening a second gate first', 'A wormhole needs two ends'); yield* this.wait(3); }
+    const g = this.game, p = g.player, s = g.state, d = this.dbg;
+    if (s.order.length < 2) { g.unlockNext(); this.cap('Opening a second well first', 'A wormhole needs two ends'); yield* this.wait(4.5); }
     const id = s.open[p.planet.def.id] ? p.planet.def.id : 'thalassa', gate = g.gates.get(id);
-    g.warpTo(id, 0, 34);
+    g.warpTo(id, 0, 30);
+    d.fly = false;
+    this.cap(`${gate.planet.def.name}'s well`, 'Step into the shaft and it carries you down', 'move');
     yield* this.wait(1.5);
-    this.cap(`Wormhole to ${gate.dest.planet.def.name}`, 'Step or fly through the ring', 'fly');
-    yield* this.flyTo(gate.planet, gate.center.clone(), 0.5, 20, 0, () => !!g.transit);
-    this.cap('In transit', 'The tunnel holds until the far side has streamed in');
+    for (let t = 0; t < 12 && !p.inside; t += this.dt) { this.aimAt(v1.copy(gate.planet.pos).add(gate.site)); d.move.set(0, 1); yield; }
+    d.move.set(0, 0);
+    for (let t = 0; t < 40 && p.ride; t += this.dt) { this.cap('Falling to the core', `${fmtDist(Math.abs(p.alt))} down at ${fmtSpeed(p.speed)}: fastest mid-shaft, gentle at both ends`, 'none'); yield; }
+    this.cap(`The gate, at the core of ${gate.planet.def.name}`, s.order.length > 2 ? `Front face: on to ${gate.next.planet.def.name}. Back face: back to ${gate.prev.planet.def.name}.` : `Through the ring to ${gate.next.planet.def.name}`, 'fly');
+    d.fly = true;
+    // come round to the front face, then through
+    yield* this.flyTo(gate.planet, gate.z.clone().multiplyScalar(40), 6, 20);
+    yield* this.flyTo(gate.planet, gate.z.clone().multiplyScalar(-6), 0.5, 20, 0, () => !!g.transit);
+    this.cap('In transit', 'Nothing that was chasing you can follow');
     while (g.transit) yield;
-    this.cap(`Arrived on ${p.planet.def.name}`, s.order.length > 2 ? 'At a gate, the destination control cycles where it leads' : 'Open more gates to choose between destinations', s.order.length > 2 ? 'act' : 'none');
-    yield* this.wait(5);
+    this.cap(`Core of ${p.planet.def.name}`, 'You step out of the far gate\'s back face: the door behind you leads back', 'none');
+    yield* this.wait(4);
+    this.cap('Ride the shaft up', 'A super leap inside a world carries you up to its wellhead', 'jump');
+    d.jump = true; yield;
+    for (let t = 0; t < 40 && (p.inside || p.eject > 0); t += this.dt) yield;
+    yield* this.wait(3);
     this.stopDemo();
   }
 
@@ -419,10 +526,11 @@ export class Dev {
     this.cap(`Flying to ${to.def.name}`, 'First climb: your speed limit rises with every metre of altitude', 'fly');
     yield* this.flyTo(from, p.pos.clone().sub(from.pos).setLength(R * 1.6), 500, 40);
     this.cap('Aim at the world marker', `Aim assist bends your course toward ${to.def.name}. ${fmtDist(p.pos.distanceTo(to.pos))} to go`, 'fly');
-    yield* this.flyTo(to, tg.center.clone().setLength(to.def.radius * 3), to.def.radius * 0.3, 150);
-    this.cap('Descent', 'Keep the control held: braking is automatic as the ground comes up', 'fly');
-    yield* this.flyTo(to, tg.center.clone().addScaledVector(tg.z, 34), 12, 150);
-    this.cap(`Landed on ${to.def.name}`, to.def.title, 'brake');
+    yield* this.flyTo(to, tg.site.clone().setLength(to.def.radius * 3), to.def.radius * 0.3, 150);
+    this.cap('Descent', 'Keep going: braking is automatic as the ground comes up', 'fly');
+    yield* this.flyTo(to, tg.site.clone().addScaledVector(tg.z, 44).addScaledVector(tg.up, 2), 12, 150);
+    this.cap(`Landed on ${to.def.name}`, to.def.title, 'land');
+    this.dbg.fly = false;
     yield* this.wait(5);
     this.stopDemo();
   }
@@ -445,18 +553,20 @@ export class Dev {
     const sunDeg = (Math.asin(Math.max(-1, Math.min(1, p.up.dot(p.planet.sunDir)))) * 180) / Math.PI;
     this.$('dv-fps').textContent = `${this.fps.toFixed(0)} fps`;
     const row = (k, v) => `<span>${k}</span><b>${v}</b>`;
-    this.$('dv-tele').innerHTML = row('World', `${def.name} (${ELEMENTS[def.element].label})`) + row('Altitude', fmtDist(Math.max(0, p.alt)) + (p.grounded ? ' · grounded' : ''))
+    this.$('dv-tele').innerHTML = row('World', `${def.name} (${ELEMENTS[def.element].label})`) + row(p.inside ? 'Depth' : 'Altitude', fmtDist(Math.abs(p.alt)) + (p.grounded ? ' · grounded' : p.inside ? ' · inside' : ''))
       + row('Speed / limit', `${fmtSpeed(p.speed)} / ${fmtSpeed(p.vLimit)}`) + row('Sun elevation', sunDeg.toFixed(0) + '°')
       + row('Frame', `${(1000 / (this.fps || 1)).toFixed(1)} ms avg · ${(worst * 1000).toFixed(0)} ms worst`)
       + row('Draw calls / tris', `${info.calls} / ${(info.triangles / 1000).toFixed(0)}k`)
+      + row('Health', `${Math.round(g.health)}${g.dead ? ' · dead' : ''}`) + row('Guardians', `${g.combat.enemies.length} posted · ${g.combat.hunting} hunting · ${g.combat.pursuing} pursuing`)
+      + row('Time', g.time.freezeT > 0 ? 'frozen' : g.time.slowT > 0 ? 'slowed' : 'normal') + row('Relics', g.time.list().join(', ') || 'none')
       + row('Terrain queue', g.manager.pending || 0) + row('Scenery', g.props.count)
       + row('Render', `${this.renderer.domElement.width}×${this.renderer.domElement.height} (${Math.round(this.quality.scale * 100)}%)`);
     const obj = g.objective();
     this.$('dv-quest').innerHTML = row('Objective', esc(obj.lines[0])) + row('Linked', s.order.join(' → '))
       + row('Essence', Object.entries(s.inv).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(', ') || 'none');
     const i = this.input, bar = (k, v) => `<span>${k}</span><i><u style="width:${Math.round(Math.abs(v) * 100)}%;${v < 0 ? 'background:#ff8a5c' : ''}"></u></i>`;
-    this.$('dv-input').innerHTML = bar('Fly', Math.max(i.left.trigger, i.right.trigger) || Math.min(i.left.trigger, i.right.trigger)) + bar('Gather', Math.max(i.left.grip, i.right.grip))
-      + bar('Move X', i.move.x) + bar('Move Y', i.move.y) + bar('Lift', i.lift);
+    this.$('dv-input').innerHTML = bar('Fly', Math.max(i.left.trigger, i.right.trigger) || Math.min(i.left.trigger, i.right.trigger)) + bar('Move X', i.move.x) + bar('Move Y', i.move.y)
+      + bar('Lift', i.lift) + bar('Cast', i.cast ? 1 : 0) + bar('Flight', i.flyMode ? 1 : 0);
     const rs = this.$('dv-res'); if (document.activeElement !== rs) { rs.value = this.quality.scale; this.$('dvo-res').textContent = Math.round(this.quality.scale * 100) + '%'; }
   }
 }

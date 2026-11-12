@@ -2,6 +2,7 @@
 // that drifts in front of you, and labelled markers for every world.
 import * as THREE from 'three';
 import { ELEMENTS, ELEMENT_ORDER } from './worlds.js';
+import { uvVS, veilFS } from './shaders.js';
 
 const FONT = 'system-ui, "Segoe UI", Roboto, sans-serif';
 
@@ -47,11 +48,62 @@ export class Hud {
     this.markers = new Map();
     this.tick = 0; this.wristTimer = 0;
     this.markersOn = true; this.flatKey = '';
+    // The objectives panel stays out of the way until asked for.
+    this.showObjectives = false;
+    this.wrist.mesh.visible = false;
+    // Vitals: a slim strip low in view that appears only when it has news
+    // (hurt, essence gained or spent, a relic used) and fades again.
+    this.vitals = panel(0.6, 0.075, 960, 120);
+    this.vitals.mesh.material.opacity = 0;
+    camera.add(this.vitals.mesh);
+    this.vitalsT = 0; this.vitalsKey = '';
+    // Veil: full-view tint for damage, time effects and fades.
+    this.veilU = { uTint: { value: new THREE.Vector4(1, 0, 0, 0) }, uFade: { value: new THREE.Vector4(0, 0, 0, 0) } };
+    this.veil = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ vertexShader: uvVS, fragmentShader: veilFS, uniforms: this.veilU, transparent: true, depthTest: false, depthWrite: false }));
+    this.veil.position.z = -0.3; this.veil.renderOrder = 980; this.veil.frustumCulled = false;
+    camera.add(this.veil);
   }
 
   say(title, sub = '', seconds = 5, color = '#ffffff') {
     this.toastQueue.push({ title, sub, seconds, color });
     if (this.toastQueue.length > 3) this.toastQueue.shift();
+  }
+
+  toggleObjectives() { this.showObjectives = !this.showObjectives; return this.showObjectives; }
+
+  // Show the vitals strip for a few seconds.
+  poke(sec = 3.5) { this.vitalsT = Math.max(this.vitalsT, sec); }
+
+  drawVitals(s) {
+    const { ctx, tex } = this.vitals;
+    ctx.clearRect(0, 0, 960, 120);
+    ctx.textBaseline = 'middle';
+    let x = 20;
+    // health
+    ctx.fillStyle = 'rgba(6,10,22,0.6)'; rr(ctx, x, 36, 300, 48, 24); ctx.fill();
+    const hp = Math.max(0, s.health / 100);
+    ctx.fillStyle = hp > 0.5 ? '#7be08a' : hp > 0.25 ? '#ffc65c' : '#ff6b5c';
+    if (hp > 0.02) { rr(ctx, x + 6, 42, 288 * hp, 36, 18); ctx.fill(); }
+    x += 324;
+    // essence you carry (only what you have)
+    for (const el of ELEMENT_ORDER) {
+      const n = s.inv[el]; if (!n) continue;
+      ctx.fillStyle = 'rgba(6,10,22,0.6)'; rr(ctx, x, 30, 84, 60, 30); ctx.fill();
+      if (el === s.castEl) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke(); }
+      ctx.beginPath(); ctx.arc(x + 28, 60, 15, 0, 6.3); ctx.fillStyle = ELEMENTS[el].css; ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = `700 30px ${FONT}`; ctx.textAlign = 'left'; ctx.fillText(String(n), x + 50, 62);
+      x += 92;
+    }
+    // time relic
+    if (s.weapon) {
+      const w = s.weapon, label = w.short + (w.count != null ? ` ${w.count}` : '');
+      ctx.font = `700 28px ${FONT}`;
+      const tw = ctx.measureText(label).width + 44;
+      ctx.fillStyle = 'rgba(6,10,22,0.6)'; rr(ctx, 940 - tw, 30, tw, 60, 30); ctx.fill();
+      ctx.strokeStyle = w.css; ctx.globalAlpha = w.ready ? 1 : 0.35; ctx.lineWidth = 3; ctx.stroke();
+      ctx.fillStyle = w.css; ctx.textAlign = 'center'; ctx.fillText(label, 940 - tw / 2, 62); ctx.globalAlpha = 1;
+    }
+    tex.needsUpdate = true;
   }
 
   drawToast(m) {
@@ -132,7 +184,7 @@ export class Hud {
     ctx.fillStyle = '#ffffff'; ctx.font = `600 30px ${FONT}`;
     ctx.fillText(`${s.place}`, 32, 366, 580);
     ctx.fillStyle = '#9fb4d8'; ctx.font = `400 28px ${FONT}`;
-    ctx.fillText(`Speed ${fmtSpeed(s.speed)}   ·   Altitude ${fmtDist(Math.max(0, s.alt))}`, 32, 416, 580);
+    ctx.fillText(`Speed ${fmtSpeed(s.speed)}   ·   ${s.alt < -1 ? 'Depth' : 'Altitude'} ${fmtDist(Math.abs(s.alt))}`, 32, 416, 580);
     tex.needsUpdate = true;
   }
 
@@ -160,8 +212,27 @@ export class Hud {
         this.toastScale = Math.min(1, (hw / d) * 2.3 * 2 * 0.92 / 1.5);
       }
     }
+    wm.visible = this.showObjectives;
     this.wristTimer -= dt;
-    if (this.wristTimer <= 0) { this.wristTimer = 0.2; this.drawWrist(state); }
+    if (wm.visible && this.wristTimer <= 0) { this.wristTimer = 0.2; this.drawWrist(state); }
+
+    // --- vitals strip
+    const vm = this.vitals.mesh, cam = this.camera;
+    const vkey = [Math.round(state.health), ELEMENT_ORDER.map((e) => state.inv[e]).join(), state.castEl, state.weapon ? state.weapon.short + state.weapon.count + state.weapon.ready : ''].join('|');
+    if (vkey !== this.vitalsKey) { if (this.vitalsKey) this.poke(); this.vitalsKey = vkey; this.drawVitals(state); }
+    if (state.health < 99.5) this.poke(1);
+    this.vitalsT -= dt;
+    vm.material.opacity += ((this.vitalsT > 0 ? 1 : 0) - vm.material.opacity) * Math.min(1, dt * 6);
+    vm.visible = vm.material.opacity > 0.01;
+    if (this.input.xr) { vm.position.set(0, -0.3, -0.9); vm.scale.setScalar(0.75); this.veil.scale.set(1, 1, 1); }
+    else {
+      const d = 0.75, hh = Math.tan((cam.fov * Math.PI) / 360) * d, hw = hh * cam.aspect;
+      const sc = Math.min(1.5, (hw * 2 * (cam.aspect < 1 ? 0.9 : 0.42)) / 0.6);
+      vm.scale.setScalar(sc);
+      // touch layouts keep the bottom for thumbs: the strip sits at the top centre
+      vm.position.set(0, this.input.touch.on ? hh - 0.07 * sc - hh * 0.04 : -hh + 0.06 * sc + hh * 0.03, -d);
+      this.veil.scale.set(hw / d * 0.3 * 1.1, hh / d * 0.3 * 1.1, 1);
+    }
 
     // --- toast: lazily follows the head so it's readable but never glued to the face
     const t = this.toast.mesh;

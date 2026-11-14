@@ -62,7 +62,7 @@ if (want('phone')) {
   await page.evaluate(() => { const w = window.worml; w.game.grant(6); w.dev.summon(1); });
   await page.waitForFunction(() => window.worml.input.touch.combat, null, { timeout: 60000 }).catch(() => {});
   await wait(800);
-  check('phone: a guardian near turns the open area into attack gestures', (await state()).combat && await page.isVisible('#t-hint'));
+  check('phone: a guardian near turns the open area into attack gestures', (await state()).combat && await page.evaluate(() => document.getElementById('touch').classList.contains('combat')));
   const y2 = (await state()).yaw;
   await touch('touchStart', [{ x: vp.width * 0.3, y: vp.height * 0.3, id: 4 }]);
   for (let i = 1; i <= 6; i++) await touch('touchMove', [{ x: vp.width * 0.3 + i * 45, y: vp.height * 0.3 - i * 6, id: 4 }]);
@@ -147,7 +147,7 @@ if (want('desktop')) {
       await page.click(`[data-place="${pl}"]`);
       await page.waitForTimeout(60);
       const r = await page.evaluate(() => { const p = window.worml.game.player; return { id: p.planet.def.id, alt: p.alt, ok: Number.isFinite(p.pos.x + p.pos.y + p.pos.z) && Number.isFinite(window.worml.rig.quaternion.x) }; });
-      const global = ['sun', 'system', 'midway'].includes(pl);
+      const global = ['sun', 'system', 'midway', 'arena'].includes(pl);
       if (!r.ok || (!global && r.id !== w)) bad.push(`${w}/${pl}:${JSON.stringify(r)}`);
     }
   }

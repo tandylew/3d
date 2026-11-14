@@ -79,8 +79,8 @@ export class Trials {
   }
 
   // A telegraphed eruption. pos solar, up unit; bursts after `warn` seconds.
-  hazard(pos, up, rgb, r = 4.5, warn = 1.25, dmg = 13) {
-    if (this.hazards.length < MAXH) this.hazards.push({ pos: pos.clone(), up: up.clone(), rgb, r, warn, dmg, t: 0, burst: false });
+  hazard(pos, up, rgb, r = 4.5, warn = 1.25, dmg = 13, tall = 16) {
+    if (this.hazards.length < MAXH) this.hazards.push({ pos: pos.clone(), up: up.clone(), rgb, r, warn, dmg, tall, t: 0, burst: false });
   }
 
   // The Rewinder un-happens eruptions near its beam.
@@ -203,7 +203,7 @@ export class Trials {
     if ((f.hazT -= dt) <= 0) {
       f.hazT = 2.2 + this.rnd() * 1.6;
       v1.copy(g.headSolar).addScaledVector(pl.vel, 0.8).add(v2.set(this.rnd() - 0.5, this.rnd() - 0.5, this.rnd() - 0.5).multiplyScalar(8));
-      this.hazard(v1, v2.copy(v1).sub(pl.pos).cross(this.up).normalize(), [1.0, 0.75, 0.35], 6, 1.3, 14);
+      this.hazard(v1, v2.copy(v1).sub(pl.pos).cross(this.up).normalize(), [1.0, 0.75, 0.35], 6, 1.3, 14, 0);     // in open space a flare is a ring and a burst, not a column across your face
     }
     if (f.phase === 'rest') {
       if ((f.restT -= dt) > 0) return;
@@ -276,7 +276,7 @@ export class Trials {
       m4.compose(v1, q1, sc.setScalar(h.burst ? h.r * (1 + (h.t - h.warn) * 2) : h.r * (1.6 - 0.6 * k)));
       this.rings.setMatrixAt(n, m4); this.rings.setColorAt(n, col.setRGB(...h.rgb).multiplyScalar(h.burst ? Math.max(0, 1 - (h.t - h.warn) * 2.5) : 0.4 + k));
       const e = h.burst ? Math.max(0, 1 - (h.t - h.warn) / 0.5) : 0;
-      m4.compose(v1, q1, sc.set(h.r * 0.5 * e + 0.001, 16 * e + 0.001, h.r * 0.5 * e + 0.001));
+      m4.compose(v1, q1, sc.set(h.r * 0.5 * e + 0.001, h.tall * e + 0.001, h.r * 0.5 * e + 0.001).multiplyScalar(h.tall ? 1 : 0));
       this.cols.setMatrixAt(n, m4); this.cols.setColorAt(n, col.setRGB(...h.rgb));
       n++;
     }

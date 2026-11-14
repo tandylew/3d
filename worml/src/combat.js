@@ -10,13 +10,13 @@ import { ELEMENTS, WEAK_TO, groundHeight } from './worlds.js';
 import { Builder, propMaterial, glowMaterial } from './gfx.js';
 import { mulberry32 } from './noise.js';
 
-const MAXE = 44, MAXB = 96, MAX_PURSUERS = 6, MAXL = 6;
+const MAXE = 48, MAXB = 260, MAX_PURSUERS = 6, MAXL = 6;
 const L1 = 1.25, L2 = 1.45, BODY_H = 1.55;
 const TAU = Math.PI * 2;
 const m4 = new THREE.Matrix4(), q1 = new THREE.Quaternion(), v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
 const sc = new THREE.Vector3(), col = new THREE.Color(), UPV = new THREE.Vector3();
 const F = new THREE.Vector3(), Rv = new THREE.Vector3(), hip = new THREE.Vector3(), knee = new THREE.Vector3(), rest = new THREE.Vector3(), bend = new THREE.Vector3();
-const Y = new THREE.Vector3(0, 1, 0);
+const Y = new THREE.Vector3(0, 1, 0), WHITE = new THREE.Color(1, 1, 1);
 
 // Bodies face +Z and are about 1.4 m across.
 const BODIES = {
@@ -71,18 +71,32 @@ const BODIES = {
 
 // legs: how many; limb: colour of the legs; striker: closes in and pounces (others keep range and spit)
 const STATS = {
-  water: { hp: 55, dmg: 6, aggro: 32, n: 2, legs: 6, limb: [0.16, 0.42, 0.46], thick: 0.7 },
-  fire: { hp: 90, dmg: 9, aggro: 75, n: 3, legs: 4, limb: [0.13, 0.1, 0.09], thick: 1.2 },
-  metal: { hp: 120, dmg: 9, aggro: 70, n: 3, legs: 4, limb: [0.5, 0.5, 0.54], thick: 1.0 },
-  wood: { hp: 90, dmg: 9, aggro: 80, n: 4, legs: 6, limb: [0.3, 0.24, 0.14], thick: 0.8 },
-  earth: { hp: 140, dmg: 10, aggro: 70, n: 3, legs: 4, limb: [0.62, 0.42, 0.28], thick: 1.6 },
-  magic: { hp: 120, dmg: 12, aggro: 90, n: 5, legs: 4, limb: [0.42, 0.3, 0.6], thick: 0.8 },
+  water: { hp: 24, dmg: 6, aggro: 32, n: 2, legs: 6, limb: [0.16, 0.42, 0.46], thick: 0.7 },
+  fire: { hp: 32, dmg: 9, aggro: 75, n: 3, legs: 4, limb: [0.13, 0.1, 0.09], thick: 1.2 },
+  metal: { hp: 40, dmg: 9, aggro: 70, n: 3, legs: 4, limb: [0.5, 0.5, 0.54], thick: 1.0 },
+  wood: { hp: 30, dmg: 9, aggro: 80, n: 4, legs: 6, limb: [0.3, 0.24, 0.14], thick: 0.8 },
+  earth: { hp: 44, dmg: 10, aggro: 70, n: 3, legs: 4, limb: [0.62, 0.42, 0.28], thick: 1.6 },
+  magic: { hp: 36, dmg: 12, aggro: 90, n: 5, legs: 4, limb: [0.42, 0.3, 0.6], thick: 0.8 },
 };
 
 function limbGeometry(color) {
   const b = new Builder();
   b.add(new THREE.CylinderGeometry(0.07, 0.13, 1, 6).translate(0, 0.5, 0), color, 0);
   b.add(new THREE.SphereGeometry(0.15, 8, 6), color.map((c) => c * 0.7), 0);
+  return b.build();
+}
+
+// A wing: a tapered membrane lying in the XZ plane, root at the origin, tip along +X.
+function wingGeometry(color) {
+  const g = new THREE.PlaneGeometry(1, 1, 5, 2).rotateX(-Math.PI / 2).translate(0.5, 0, 0), p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i);
+    p.setXYZ(i, x, Math.sin(x * 3.1) * 0.08, z * (1 - x * 0.75) + x * 0.35 + Math.sin(x * 12) * 0.05 * (z > 0 ? 1 : 0));
+  }
+  g.computeVertexNormals();
+  const b = new Builder();
+  b.add(g, color, -1);
+  b.limb([[0, 0, -0.45], [0.5, 0.05, -0.3], [1, 0, -0.05]], 0.05, 0.02, 5, color.map((c) => c * 0.6));
   return b.build();
 }
 
@@ -101,7 +115,7 @@ export class Combat {
     this.planet = null; this.rnd = mulberry32(4711); this.nextId = 1;
     this.group = new THREE.Group();
     scene.add(this.group);
-    this.bodies = {}; this.limbs = {}; this.heads = {};
+    this.bodies = {}; this.limbs = {}; this.heads = {}; this.wings = {};
     this.eyes = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), glowMaterial([1, 1, 1], 1.4, 1.6), MAXE);
     this.eyes.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAXE * 3), 3);
     this.bars = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ toneMapped: false, depthWrite: false, transparent: true, opacity: 0.9 }), MAXE);
@@ -118,6 +132,7 @@ export class Combat {
       this.bodies[el] = mk(BODIES[el](), MAXE);
       this.limbs[el] = mk(limbGeometry(st.limb), MAXE * MAXL * 2);
       this.heads[el] = mk(headGeometry(st.limb.map((c) => c * 1.15)), MAXE);
+      this.wings[el] = mk(wingGeometry(ELEMENTS[el].rgb.map((c, i) => c * 0.45 + st.limb[i] * 0.5)), MAXE * 2);
     }
     return this.bodies[el];
   }
@@ -139,6 +154,7 @@ export class Combat {
       nest: o.pos.clone().sub(o.planet.pos),
       pos: o.pos.clone(), vel: new THREE.Vector3(), fwd: new THREE.Vector3(1, 0, 0), head: o.pos.clone(),
       hp: o.hp || st.hp, max: o.hp || st.hp, dmg: o.dmg || st.dmg, aggro: 200, striker: o.striker ?? this.rnd() < 0.5,
+      pass: 'in', passT: 0, rewTo: null,
       state: o.emerge ? 'emerge' : 'chase', em: 0, act: 'run', actT: 0, air: !!o.space, h: o.emerge && !o.space ? -2.4 * sz : BODY_H * sz, vy: 0, pitch: 0,
       cool: 1 + this.rnd() * 2, cool2: 1.5 + this.rnd() * 3, dodgeCool: 0, phase: this.rnd() * TAU, hist: [], histT: 0,
       stun: 0, root: 0, burn: 0, slow: 0, pacify: 0, flash: 0, foreign: false, rew: 0, dead: 0, age: 0, near: true,
@@ -193,6 +209,64 @@ export class Combat {
       size: power.size || 0.36, dmg: power.dmg || 24, perfect: !!power.perfect, echo: fromEcho, warned: false });
   }
 
+  // Who a burst should go after: the guardian nearest the aim, else the nearest one hunting you.
+  pickTarget(origin, dir, not = null) {
+    let best = null, bs = 1e9;
+    for (const e of this.enemies) {
+      if (e.state === 'dead' || e.state === 'rewind' || (not && not.has(e.id))) continue;
+      v1.copy(e.pos).sub(origin); const d = v1.length();
+      if (d > 160) continue;
+      const cos = dir ? v1.dot(dir) / (d || 1) : 1;
+      if (dir && cos < 0.3) continue;
+      const score = d * (dir ? 1.6 - cos : 1);
+      if (score < bs) { bs = score; best = e; }
+    }
+    return best;
+  }
+
+  // The charged cast: a surge of the element that hunts its target down and
+  // destroys it. Water runs on like a river to the next; fire bursts; wood
+  // roots and earth staggers everything round the impact.
+  burst(origin, dir, el, target, fromEcho = false) {
+    this.bolts.push({ pos: origin.clone(), vel: dir.clone().multiplyScalar(40).add(this.game.player.vel), life: 5, from: 'burst', el, rgb: ELEMENTS[el].rgb, size: 0.7,
+      target, trail: [], hits: new Set(), chain: el === 'water' ? 3 : el === 'metal' ? 2 : 0, perfect: true, dmg: 260, echo: fromEcho });
+    this.game.audio.sweep(0.7, 300, 2200, 0.35);
+  }
+
+  // The kill-charged blast: everything within reach of you is struck at once.
+  nova(center, radius, dmg, rgb) {
+    let n = 0;
+    for (const e of this.enemies) {
+      if (e.state === 'dead' || e.pos.distanceTo(center) > radius + e.sz) continue;
+      this.damage(e, dmg, null, false, true); n++;
+      if (e.state !== 'dead') { e.stun = 1.2; e.vel.addScaledVector(v1.copy(e.pos).sub(center).normalize(), 24); }
+    }
+    UPV.copy(this.game.player.up);
+    v2.set(-UPV.y, UPV.x, 0); if (v2.lengthSq() < 0.01) v2.set(0, -UPV.z, UPV.y); v2.normalize(); v3.crossVectors(UPV, v2);
+    for (let i = 0; i < 40 && this.bolts.length < MAXB - 10; i++) {
+      const a = (i / 40) * TAU;
+      this.bolts.push({ pos: center.clone(), vel: v1.copy(v2).multiplyScalar(Math.cos(a)).addScaledVector(v3, Math.sin(a)).multiplyScalar(radius / 0.45).clone(), life: 0.45, from: 'fx', rgb, size: 0.5 });
+    }
+    this.spark(center, rgb, 20, 18);
+    this.game.audio.sweep(0.6, 3000, 120, 0.5); this.game.audio.tone(55, 0.7, 'sawtooth', 0.22, 0, 0.4);
+    return n;
+  }
+
+  // The Rewinder: note where every guardian near `center` stands now...
+  mark(center, radius) {
+    const out = [];
+    for (const e of this.enemies) if (e.state !== 'dead' && e.pos.distanceTo(center) < radius) out.push({ e, pos: e.pos.clone() });
+    return out;
+  }
+
+  // ...and later put each one back there.
+  rewindTo(marks) {
+    let n = 0;
+    for (const m of marks) if (m.e.state !== 'dead' && this.enemies.includes(m.e)) { m.e.rewTo = m.pos.clone(); m.e.act = 'run'; n++; this.spark(m.e.pos, [1, 0.75, 0.35], 5, 6); }
+    this.bolts = this.bolts.filter((b) => b.from !== 'enemy');
+    return n;
+  }
+
   // A melee sweep: a blade of light `half` metres either side of its centre,
   // travelling a short way forward. It is free to throw and hits everything it crosses once.
   slash(origin, dir, sweep, el, power = 0.6, perfect = false) {
@@ -211,9 +285,11 @@ export class Combat {
   }
 
   // Returns the total multiplier applied (element x eye strike).
-  damage(e, amount, el = null, eye = false) {
+  // heavy: blades, bursts and novas, which a guard does not stop.
+  damage(e, amount, el = null, eye = false, heavy = false) {
     if (e.state === 'dead' || e.state === 'rewind') return 0;
     let mult = eye ? 1.6 : 1;
+    if (e.act === 'guard' && !heavy) { mult *= 0.3; this.spark(e.head, [0.8, 0.8, 0.85], 4, 5); }
     if (el) {
       mult *= e.el === 'magic' ? 1.4 : WEAK_TO[e.el] === el ? 2.5 : el === e.el ? 0.6 : 1;
       if (el === 'water') e.slow = 3; else if (el === 'fire') e.burn = 3; else if (el === 'wood') e.root = 1.6;
@@ -269,6 +345,12 @@ export class Combat {
     for (const e of this.enemies) {
       e.age += dt; e.flash = Math.max(0, e.flash - raw * 4);
       if (e.state === 'dead') { e.dead -= raw; continue; }
+      if (e.rewTo) {
+        // hauled back through its own last moments to where it stood
+        e.pos.lerp(e.rewTo, 1 - Math.exp(-raw * 7)); e.vel.set(0, 0, 0);
+        if (e.pos.distanceTo(e.rewTo) < 0.7) { e.rewTo = null; e.stun = 1.4; this.spark(e.pos, [1, 0.75, 0.35], 6, 5); for (const l of e.legs) l.set = false; }
+        continue;
+      }
       const dist = e.pos.distanceTo(target);
       e.near = dist < 420;
       if (e.state === 'emerge') {
@@ -336,19 +418,32 @@ export class Combat {
 
       v1.copy(target).sub(e.pos);
       if (e.air) {
-        // ---- airborne: legs trailing, ring round you, or run you down across space
+        // ---- on the wing: never hovering. It comes in on a line beside you, strikes as it
+        // passes, pulls away climbing, banks and comes round again.
+        e.passT -= dt;
         if (e.state === 'chase') {
-          const a = e.phase + wt * 0.35;
-          v2.set(-UPV.y, UPV.x, 0); if (v2.lengthSq() < 0.01) v2.set(0, -UPV.z, UPV.y); v2.normalize();
-          const ring = e.boss ? 34 : 13;
-          v1.addScaledVector(v2, Math.cos(a) * ring).addScaledVector(v3.crossVectors(UPV, v2), Math.sin(a) * ring).addScaledVector(UPV, e.boss ? 10 : 3.5);
+          if (e.pass === 'in') {
+            v2.crossVectors(UPV, v1); if (v2.lengthSq() < 1e-4) v2.set(1, 0, 0); v2.normalize();
+            v1.addScaledVector(v2, (e.id % 2 ? 1 : -1) * (e.boss ? 30 : 5)).addScaledVector(UPV, e.boss ? 14 : 2);
+            if (v1.length() < (e.boss ? 46 : 10) || e.passT < -7) {
+              // closest approach: talons for strikers, a bolt (a volley, for the Heliarch) for the rest
+              e.pass = 'out'; e.passT = (e.boss ? 2.4 : 1.3) + this.rnd() * 0.8;
+              if (e.stun <= 0) {
+                if (e.striker && !e.boss && dist < 6.5) { if (!g.decoyActive()) g.hurt(Math.round(e.dmg * 1.3)); this.spark(target, ELEMENTS[e.el].rgb, 6); }
+                else this.spit(e, target);
+              }
+            }
+          } else {
+            v1.copy(e.vel); if (v1.lengthSq() < 1) v1.copy(e.fwd); v1.normalize().multiplyScalar(40).addScaledVector(UPV, 16);
+            if (e.passT <= 0) { e.pass = 'in'; e.passT = 0; }
+          }
         }
         const d = v1.length();
-        const speed = (e.state === 'chase' ? Math.min(17, d * 1.5) : Math.min(22 + 0.72 * Math.max(0, alt), d * 1.2 + 12)) * mob;
+        const speed = (e.state === 'chase' ? (e.boss ? 17 : 22) : Math.min(22 + 0.72 * Math.max(0, alt), d * 1.2 + 12)) * mob;
         v1.divideScalar(d || 1);
         const inward = v1.dot(UPV), R = near.def.radius;
         if (inward < 0 && alt < R * 0.4 && d > R * 0.5) v1.addScaledVector(UPV, -inward).normalize();   // skim round a world, don't dive through it
-        e.vel.lerp(v1.multiplyScalar(speed), 1 - Math.exp(-dt * 3));
+        e.vel.lerp(v1.multiplyScalar(speed), 1 - Math.exp(-dt * (e.state === 'chase' ? 2.4 : 3)));
         e.pos.addScaledVector(e.vel, dt);
         if (alt < 400) {
           v1.copy(e.pos).sub(near.pos);
@@ -356,11 +451,10 @@ export class Combat {
           const floor = near.def.radius + groundHeight(near.def, UPV.x, UPV.y, UPV.z) + 3.2;
           if (r < floor) e.pos.copy(near.pos).addScaledVector(UPV, floor);
         }
-        v1.copy(target).sub(e.pos).normalize();
-        e.fwd.lerp(v1, Math.min(1, dt * 5)).normalize();
+        // it faces the way it flies
+        if (e.vel.lengthSq() > 4) e.fwd.lerp(v1.copy(e.vel).normalize(), Math.min(1, dt * 6)).normalize();
         e.pitch += (0 - e.pitch) * Math.min(1, dt * 6);
-        if (e.act === 'windup') { e.actT -= dt; if (e.actT <= 0) { this.spit(e, target); e.act = 'run'; } }
-        else if (e.state === 'chase' && dist < (e.boss ? 160 : 55) && e.cool <= 0 && e.stun <= 0) this.setAct(e, 'windup', 0.5);
+        e.act = 'run';
       } else {
         // ---- on the ground: run, strafe, crouch, pounce, rear up, sidestep
         v1.addScaledVector(UPV, -v1.dot(UPV));              // flat direction to the target
@@ -388,6 +482,8 @@ export class Combat {
           if (e.h <= BODY_H * e.sz && e.vy < 0) { e.h = BODY_H * e.sz; e.vy = 0; e.cool2 = 3 + this.rnd() * 2.5; this.setAct(e, 'recover', 0.55); e.vel.multiplyScalar(0.2); }
         } else if (e.act === 'windup') {
           if (e.actT <= 0) { this.spit(e, target); this.setAct(e, 'recover', 0.3); }
+        } else if (e.act === 'guard') {
+          if (e.actT <= 0) e.act = 'run';      // braced behind its forelegs
         } else if (e.act === 'dodge') {
           want = null;
           if (e.actT <= 0) { e.act = 'run'; e.vel.multiplyScalar(0.3); }
@@ -399,8 +495,8 @@ export class Combat {
         }
         e.pos.addScaledVector(e.vel, dt);
         // ride height: low in a crouch, reared when winding up
-        if (e.act !== 'pounce') e.h += ((e.act === 'crouch' ? 0.75 : e.act === 'recover' ? 1.1 : BODY_H) * e.sz - e.h) * Math.min(1, dt * 12);
-        e.pitch += ((e.act === 'windup' ? 0.6 : e.act === 'crouch' ? -0.25 : e.act === 'pounce' ? 0.3 : 0) - e.pitch) * Math.min(1, dt * 10);
+        if (e.act !== 'pounce') e.h += ((e.act === 'crouch' ? 0.75 : e.act === 'guard' ? 0.95 : e.act === 'recover' ? 1.1 : BODY_H) * e.sz - e.h) * Math.min(1, dt * 12);
+        e.pitch += ((e.act === 'windup' ? 0.6 : e.act === 'guard' ? 0.45 : e.act === 'crouch' ? -0.25 : e.act === 'pounce' ? 0.3 : 0) - e.pitch) * Math.min(1, dt * 10);
         UPV.copy(e.pos).sub(near.pos).normalize();
         e.pos.copy(near.pos).addScaledVector(UPV, near.def.radius + groundHeight(near.def, UPV.x, UPV.y, UPV.z) + e.h);
         // heading: where it is going when it runs, at you when it is about to act
@@ -420,6 +516,31 @@ export class Combat {
       v1.copy(b.pos);
       b.pos.addScaledVector(b.vel, step);
       if (b.from === 'fx' || b.life <= 0) continue;
+      if (b.from === 'burst') {
+        // steer onto the target; keep the path it has taken as a tail (the river, the flame, the lance)
+        let tg = b.target;
+        if (!tg || tg.state === 'dead' || !this.enemies.includes(tg)) tg = b.target = this.pickTarget(b.pos, null, b.hits);
+        if (tg) {
+          v2.copy(tg.head).sub(b.pos); const d = v2.length();
+          b.vel.lerp(v2.multiplyScalar(78 / (d || 1)), 1 - Math.exp(-raw * 7));
+          if (d < 1.6 * tg.sz + 1.2) {
+            b.hits.add(tg.id);
+            const mult = this.damage(tg, tg.boss ? b.dmg : 9999, b.el, false, true);
+            this.spark(tg.pos, b.rgb, 16, 16);
+            g.onHit(tg, mult, false, b);
+            const round = (r, fn) => { for (const o of this.enemies) if (o !== tg && o.state !== 'dead' && o.pos.distanceTo(tg.pos) < r) fn(o); };
+            if (b.el === 'fire') round(9, (o) => { this.damage(o, 70, 'fire', false, true); this.spark(o.pos, b.rgb, 6); });
+            else if (b.el === 'wood') round(11, (o) => { this.damage(o, 22, 'wood', false, true); o.root = 3.5; });
+            else if (b.el === 'earth') round(11, (o) => { this.damage(o, 22, 'earth', false, true); o.stun = 2.2; });
+            // water (and the metal lance) run on to the next
+            b.target = b.chain-- > 0 ? this.pickTarget(b.pos, null, b.hits) : null;
+            if (!b.target || b.target.pos.distanceTo(b.pos) > 30) b.life = Math.min(b.life, 0.25);
+            else b.dmg *= 0.7;
+          }
+        } else if (seal && b.pos.distanceTo(seal.pos) < seal.r) { b.life = 0; this.spark(b.pos, b.rgb, 12, 12); g.hitSeal(b.el, true); }
+        b.trail.push(b.pos.clone()); if (b.trail.length > 26) b.trail.shift();
+        continue;
+      }
       if (b.from === 'slash') {
         for (const e of this.enemies) {
           if (e.state === 'dead' || e.state === 'rewind' || b.hits.has(e.id)) continue;
@@ -428,7 +549,7 @@ export class Combat {
           const t = Math.max(-b.half, Math.min(b.half, v3.dot(b.sweep)));
           if (v3.addScaledVector(b.sweep, -t).length() < 2.0 * e.sz + 0.6) {
             b.hits.add(e.id);
-            const mult = this.damage(e, b.dmg, b.el, false);
+            const mult = this.damage(e, b.dmg, b.el, false, true);
             this.spark(e.pos, b.rgb, 6);
             g.onHit(e, mult, false, b);
           }
@@ -450,7 +571,7 @@ export class Combat {
               UPV.copy(e.pos).sub(P.pos).normalize();
               v3.crossVectors(UPV, v2).normalize().multiplyScalar((this.rnd() < 0.5 ? 1 : -1) * 26 * (e.slow > 0 ? 0.4 : 1));
               e.vel.copy(v3); e.dodgeCool = 2.2 + this.rnd(); this.setAct(e, 'dodge', 0.26);
-            }
+            } else { e.dodgeCool = 1.5; this.setAct(e, 'guard', 0.8); e.vel.multiplyScalar(0.2); }      // or it braces and takes it on its guard
             v3.copy(e.pos).sub(v1);
           }
           const t = Math.max(0, Math.min(L, along));
@@ -538,7 +659,7 @@ export class Combat {
 
   render(time) {
     const g = this.game, o = g.player.pos, camQ = g.camera.getWorldQuaternion(q1).clone();
-    const counts = {}, lc = {}; let ne = 0, nb = 0, no = 0;
+    const counts = {}, lc = {}, wcount = {}; let ne = 0, nb = 0, no = 0;
     for (const el in this.bodies) { counts[el] = 0; lc[el] = 0; }
     for (const e of this.enemies) {
       if (e.state === 'emerge' && e.em < 0.02) continue;
@@ -587,6 +708,20 @@ export class Combat {
           lm.setMatrixAt(lc[e.el]++, m4);
         }
       }
+      // wings: spread and beating in the air, folded away on the ground
+      if (e.near && e.state !== 'dead' && (e.air || e.act === 'pounce')) {
+        const wm = this.wings[e.el], wc = wcount[e.el] = wcount[e.el] || 0;
+        for (let side = -1; side <= 1 && wc + 1 < MAXE * 2; side += 2) {
+          const a = Math.sin(time * 11 + e.phase) * 0.75 + 0.2;
+          v2.copy(Rv).multiplyScalar(side * Math.cos(a)).addScaledVector(UPV, Math.sin(a)).normalize();         // along the span
+          v3.copy(F).negate();                                                                                    // chord, trailing
+          bend.crossVectors(v3, v2).normalize();
+          m4.makeBasis(v2, bend, v3);
+          m4.scale(sc.set(2.9 * sz, 1, 1.5 * sz * side));
+          m4.setPosition(knee.copy(e.pos).sub(o).addScaledVector(Rv, side * 0.45 * sz).addScaledVector(UPV, 0.35 * sz));
+          wm.setMatrixAt(wcount[e.el]++, m4);
+        }
+      }
       if (ne < MAXE && e.state !== 'dead') {
         // the eye: its element's colour at rest, hot when it has you, flaring just before it strikes
         const hot = e.state === 'chase' || e.state === 'pursue';
@@ -606,10 +741,19 @@ export class Combat {
     }
     for (const el in this.bodies) {
       this.bodies[el].count = this.heads[el].count = counts[el] || 0; this.limbs[el].count = lc[el] || 0;
-      for (const m of [this.bodies[el], this.heads[el], this.limbs[el]]) m.instanceMatrix.needsUpdate = true;
+      this.wings[el].count = wcount[el] || 0;
+      for (const m of [this.bodies[el], this.heads[el], this.limbs[el], this.wings[el]]) m.instanceMatrix.needsUpdate = true;
     }
     for (const b of this.bolts) {
       if (no >= MAXB) break;
+      if (b.from === 'burst') {
+        for (let k = 0; k < b.trail.length && no < MAXB; k++) {
+          const f = (k + 1) / b.trail.length, wob = Math.sin(time * 14 + k * 0.9) * 0.35 * (1 - f);
+          m4.compose(v1.copy(b.trail[k]).sub(o).addScaledVector(this.game.player.up, wob), q1.identity(), sc.setScalar(b.size * (0.25 + 0.9 * f)));
+          this.orbs.setMatrixAt(no, m4); this.orbs.setColorAt(no, col.setRGB(...b.rgb).lerp(WHITE, f * f * 0.5)); no++;
+        }
+        continue;
+      }
       if (b.from === 'slash') {
         // a curved blade of sparks
         for (let k = -3; k <= 3 && no < MAXB; k++) {

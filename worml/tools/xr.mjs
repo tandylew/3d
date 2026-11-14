@@ -98,9 +98,9 @@ const a0 = (await g2()).alt;
 await page.evaluate(() => window.xrDevice.controllers.right.updateButtonValue('a-button', 1));
 await wait(800);
 await page.evaluate(() => window.xrDevice.controllers.right.updateButtonValue('a-button', 0));
-await page.waitForFunction((a) => window.worml.game.player.alt > a + 150, a0, { timeout: 90000 }).catch(() => {});
+await page.waitForFunction((a) => window.worml.game.player.alt > a + 60, a0, { timeout: 90000 }).catch(() => {});
 q = await g2();
-check('A makes a super leap', q.alt > a0 + 150, `alt ${a0.toFixed(0)} -> ${q.alt.toFixed(0)} m`);
+check('A makes a leap', q.alt > a0 + 60, `alt ${a0.toFixed(0)} -> ${q.alt.toFixed(0)} m`);
 await page.screenshot({ path: 'shots/xr-leap.png' });
 
 // Swing the right controller: a blade.

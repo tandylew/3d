@@ -3,7 +3,7 @@
 // show each control in action. Opened with the DEV button, the ` key or ?dev.
 import * as THREE from 'three';
 import { PLANETS, ELEMENTS, SUN, WEAPONS, WEAPON_ORDER, WEAK_TO, TRIALS, terrainRaw, groundHeight } from './worlds.js';
-import { CAST } from './game.js';
+import { CAST, NOVA } from './game.js';
 import { ARENA } from './trials.js';
 import { FLIGHT } from './player.js';
 import { fmtDist, fmtSpeed } from './hud.js';
@@ -17,15 +17,18 @@ const CTRL = {
   fly: { vr: 'Point a hand + Trigger', key: 'W (after a leap)', touch: 'Left stick (after a leap)', hl: ['stick'] },
   brake: { vr: 'Release Trigger', key: 'Release W', touch: 'Release the stick', hl: [] },
   move: { vr: 'Left stick', key: 'W A S D', touch: 'Left stick (right stick looks)', hl: ['stick', 'look'] },
-  jump: { vr: 'A or X', key: 'Space', touch: 'Double-tap the look side', hl: ['jump'] },
+  jump: { vr: 'A or X (again while rising: higher)', key: 'Space (again while rising: higher)', touch: 'Double-tap the look side (tap again while rising: higher)', hl: ['jump'] },
+  bail: { vr: 'Release the triggers', key: 'Space while flying', touch: 'Double-tap the look side while flying', hl: ['jump'] },
+  nova: { vr: 'Click the right stick', key: 'G', touch: 'The ✹ button, when it appears', hl: ['nova'] },
   land: { vr: 'Release below 500 m', key: 'Fly down to the ground', touch: 'Fly down to the ground', hl: [] },
-  cast: { vr: 'Hold right grip, release on the flash', key: 'Hold left click, release on the flash', touch: 'Tap, or press and release on the flash', hl: ['cast'] },
+  cast: { vr: 'Right grip: tap, or hold to full charge', key: 'Left click: tap, or hold to full charge', touch: 'Tap, or press until the ring closes', hl: ['cast'] },
   slash: { vr: 'Swing a controller', key: 'V', touch: 'Swipe across the open screen', hl: ['slash'] },
-  time: { vr: 'Left grip (B switches relic)', key: 'E (Q switches relic)', touch: 'TIME (⟳ switches relic)', hl: ['time'] },
+  time: { vr: 'Left grip (B switches relic)', key: 'E (Q switches relic)', touch: 'The relic button (⟳ switches)', hl: ['time'] },
+  mark: { vr: 'Hold left grip, then let go', key: 'Hold E, then let go', touch: 'Hold the relic button, then let go', hl: ['time'] },
   none: null,
 };
 const DEMOS = [
-  ['flight', 'Take off, cruise, land'], ['walk', 'Walk, strafe, super leap'], ['gather', 'Win an element trial'], ['fight', 'Blade and cast'],
+  ['flight', 'Take off, cruise, land'], ['walk', 'Walk, leap, amp up, bail out'], ['gather', 'Win an element trial'], ['fight', 'Blade, cast, burst, blast'],
   ['relics', 'The four time relics'], ['unseal', 'Break a seal'], ['transit', 'Core, gate, and back up'], ['travel', 'Fly to another world'],
 ];
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), q1 = new THREE.Quaternion();
@@ -70,9 +73,9 @@ export class Dev {
       <details open><summary>Spells &amp; relics</summary>
         <p class="note">Spell: the element your casts spend. Auto picks what the target is weak to.</p>
         <div class="chips">${['water', 'fire', 'metal', 'wood', 'earth'].map((e) => `<button class="chip" data-spell="${e}" style="--c:${ELEMENTS[e].css}">${ELEMENTS[e].label}</button>`).join('')}<button class="chip sel" data-spell="auto" style="--c:#cfe0ff">Auto</button></div>
-        <div class="grid"><button data-cast="quick">Quick cast<small>tap</small></button><button data-cast="perfect">Perfect cast<small>release on the flash</small></button><button data-cast="over">Overheld<small>held too long</small></button></div>
+        <div class="grid"><button data-cast="quick">Quick cast<small>tap</small></button><button data-cast="perfect">Burst<small>full charge: homes and kills</small></button><button data-cast="nova">Blast<small>charged by 5 kills</small></button></div>
         <div class="meter" title="Live charge. The bright band is the perfect window."><u id="dv-charge" style="width:0"></u><b style="left:${(CAST.W0 / CAST.MAX) * 100}%;width:${((CAST.W1 - CAST.W0) / CAST.MAX) * 100}%"></b></div>
-        <div class="grid two">${WEAPON_ORDER.map((w) => `<button data-relic="${w}" style="box-shadow: inset 0 0 0 1px ${WEAPONS[w].css}">${WEAPONS[w].name}<small>${WEAPONS[w].verb} · ${WEAPONS[w].form} · give + use</small></button>`).join('')}</div>
+        <div class="grid two">${WEAPON_ORDER.map((w) => `<button data-relic="${w}" style="box-shadow: inset 0 0 0 1px ${WEAPONS[w].css}">${WEAPONS[w].name}<small>${WEAPONS[w].verb} · ${WEAPONS[w].form} · ${w === 'rewinder' ? 'click: mark, click: rewind' : 'give + use'}</small></button>`).join('')}</div>
         <div class="grid"><button data-arsenal="recharge">Recharge relics</button><button data-arsenal="foes">Summon 3</button><button data-arsenal="calm">Dismiss foes</button></div>
         <div id="dv-arsenal" class="tele"></div>
       </details>
@@ -97,7 +100,7 @@ export class Dev {
         ${slider('rate', 'Speed per metre of altitude', 0.1, 3, 0.05, FLIGHT.RATE)}
         <div class="grid two">
           ${toggle('autores', 'Auto render scale')}${toggle('clouds', 'Clouds')}${toggle('atmo', 'Atmosphere')}
-          ${toggle('props', 'Scenery')}${toggle('markers', 'World markers')}${toggle('wire', 'Wireframe', false)}
+          ${toggle('props', 'Scenery')}${toggle('markers', 'World markers')}${toggle('wire', 'Wireframe', false)}${toggle('guides', 'Guiding messages', false)}
         </div>
         <div class="grid two"><button data-tune="reset">Reset tuning</button></div>
       </details>
@@ -107,7 +110,9 @@ export class Dev {
           <tr><td>Fly</td><td>Trigger, aim hand</td><td>F toggles, W</td><td>FLY toggles, left stick</td></tr>
           <tr><td>Walk</td><td>Left stick</td><td>W A S D</td><td>Left stick</td></tr>
           <tr><td>Look / turn</td><td>Head, right stick</td><td>Mouse</td><td>Right stick</td></tr>
-          <tr><td>Super leap</td><td>A / X</td><td>Space</td><td>LEAP</td></tr>
+          <tr><td>Leap / higher / bail</td><td>A / X</td><td>Space</td><td>Double-tap look side</td></tr>
+          <tr><td>Blade</td><td>Swing</td><td>V</td><td>Swipe</td></tr>
+          <tr><td>Blast</td><td>Right stick click</td><td>G</td><td>✹</td></tr>
           <tr><td>Cast element</td><td>Right grip</td><td>Click</td><td>CAST</td></tr>
           <tr><td>Time relic</td><td>Left grip</td><td>E</td><td>TIME</td></tr>
           <tr><td>Switch relic</td><td>B</td><td>Q, 1-4</td><td>⟳</td></tr>
@@ -172,6 +177,7 @@ export class Dev {
       case 'props': g.props.enabled = v; break;
       case 'markers': g.hud.markersOn = v; break;
       case 'wire': for (const p of g.planets) p.material.wireframe = v; break;
+      case 'guides': g.hud.guides = v; break;
     }
   }
 
@@ -179,7 +185,7 @@ export class Dev {
     const set = (id, v) => { const t = this.$('dv-' + id); if (t.type === 'checkbox') t.checked = v; else t.value = v; this.tune(t); };
     set('exposure', 1); set('sun', 0); set('cloud', 0); set('v0', 26); set('rate', 0.8);
     for (const id of ['autores', 'clouds', 'atmo', 'props', 'markers']) set(id, true);
-    set('wire', false);
+    set('wire', false); set('guides', false);
   }
 
   // Slide the sun across the sky of the world you are on (lighting preview only).
@@ -332,17 +338,15 @@ export class Dev {
     const g = this.game, i = this.input;
     let el = g.castEl;
     if (!el) { g.grant(12); el = g.forceEl || 'water'; }
-    const pw = g.castPower(kind === 'quick' ? 0.08 : kind === 'perfect' ? (CAST.W0 + CAST.W1) / 2 : CAST.MAX - 0.05);
-    g.state.inv[el] = Math.max(0, g.state.inv[el] - 1);
-    g.combat.castPlayer(v1.copy(i.right.pos).add(g.player.pos).clone(), i.right.dir, el, pw);
-    g.time.echoCast(el, pw);
-    g.lastCast = pw.label; g.hud.poke();
+    if (kind === 'nova') { g.fury = NOVA.need; i.novaEdge = true; this.dbgOnce = { nova: true }; return; }
+    g.throwCast(v1.copy(i.right.pos).add(g.player.pos).clone(), i.right.dir.clone(), el, g.castPower(kind === 'quick' ? 0.08 : 1));
   }
 
   relic(id) {
     const g = this.game, tw = g.time;
     if (!tw.has(id)) g.state.weapons[id] = true;
     g.state.sel = id;
+    if (id === 'rewinder') { if (tw.marks) tw.releaseMark(); else { tw.cool.rewinder = 0; tw.beginMark(); this.heldMark = true; } g.save(); return; }
     if (!(id === 'mantle' && tw.echo)) tw.recharge();
     tw.use(this.input.xr ? this.input.left : this.input.right);
     g.save();
@@ -432,7 +436,7 @@ export class Dev {
   }
 
   // Hold the cast until the charge reaches `to` seconds, then let go.
-  *charged(aimFn, to = (CAST.W0 + CAST.W1) / 2) {
+  *charged(aimFn, to = CAST.W0 + 0.1) {
     const g = this.game, d = this.dbg;
     d.cast = true;
     for (let t = 0; t < 2.2 && g.chargeT < to; t += this.dt) { aimFn(); yield; }
@@ -468,12 +472,16 @@ export class Dev {
     this.cap('Strafe', 'Sideways, without turning', 'move');
     d.move.set(1, 0); yield* this.wait(2); d.move.set(-1, 0); yield* this.wait(2); d.move.set(0, 0);
     this.cap('Super leap', 'A giant jump into the sky, leaning the way you look', 'jump');
+    delete d.fly;
     d.jump = true; yield;
-    for (let t = 0; t < 8 && (p.leaping || t < 1); t += this.dt) { this.cap('Super leap', `${fmtDist(Math.max(0, p.alt))} up and climbing. Leap again in the air to go higher still.`, 'jump'); yield; }
-    this.cap('Hover, then come down', 'A leap leaves you flying. Fly down to the ground and you land by yourself.', 'land');
-    yield* this.wait(2.5);
-    d.fly = false;
-    for (let t = 0; t < 40 && !p.grounded; t += this.dt) yield;
+    for (let t = 0; t < 1.4; t += this.dt) { this.cap('Leap', `${fmtDist(Math.max(0, p.alt))} up. A plain leap tops out at a couple of hundred metres.`, 'jump'); yield; }
+    d.jump = true; yield;
+    for (let t = 0; t < 8 && p.leaping; t += this.dt) { this.cap('Amp it up', `Pressed again while rising: the leap keeps climbing. ${fmtDist(Math.max(0, p.alt))}`, 'jump'); yield; }
+    this.cap('Flying', 'A leap leaves you flying where you look', 'fly');
+    yield* this.wait(2);
+    this.cap('Bail out', 'Drop straight back to the ground', 'bail');
+    d.jump = true; yield;
+    for (let t = 0; t < 60 && !p.grounded; t += this.dt) yield;
     yield* this.wait(1.5);
     this.stopDemo();
   }
@@ -494,7 +502,7 @@ export class Dev {
     const g = this.game, p = g.player, def = p.planet.def, field = g.fields.get(def.id), el = ELEMENTS[def.element], T = TRIALS[def.element], site = field.site;
     if (g.state.trial[def.id]) { g.state.trial[def.id] = false; g.trials.reset(); }
     this.cap(`To ${T.name}`, `Follow the stream from the well. ${el.label} is won there, not picked up.`, 'fly');
-    this.dbg.jump = true; yield* this.wait(2.5);
+    this.dbg.jump = true; yield* this.wait(3);
     yield* this.flyTo(p.planet, site.pos.clone().addScaledVector(site.up, 6).addScaledVector(site.t1, 24), 5, 60);
     this.dbg.fly = false;
     for (let t = 0; t < 150 && !g.state.trial[def.id]; t += this.dt) {
@@ -524,12 +532,20 @@ export class Dev {
       yield* this.wait(0.45);
     }
     for (let n = 0; n < 3 && this.nearestFoe(); n++) { this.cap('Quick cast', 'A tap throws a weak bolt at once. Each cast spends one essence.', 'cast'); yield* this.charged(() => { const e = this.nearestFoe(); if (e) this.aimAt(e.head); }, 0.06); yield* this.wait(0.25); }
-    for (let n = 0; n < 14 && this.nearestFoe(); n++) {
+    this.summon(5);
+    yield* this.wait(1.6);
+    for (let n = 0; n < 4 && this.nearestFoe(); n++) {
       const el = g.castEl;
-      this.cap('Perfect cast', `Hold to charge and release on the white flash: three times the force, twice the speed. ${el ? ELEMENTS[el].label : ''} · health ${Math.round(g.health)}${g.lastHit ? ` · last hit ${g.lastHit.dmg}` : ''}`, 'cast');
-      yield* this.charged(() => { const e = this.nearestFoe(); if (e) this.aimAt(e.head); });
-      yield* this.wait(0.15);
+      this.cap('Burst', `Hold to full charge and let go: a surge of ${el ? ELEMENTS[el].label : 'your element'} hunts the guardian down and destroys it. Water runs on to the next like a river; fire bursts; wood roots; earth staggers.`, 'cast');
+      yield* this.charged(() => { const e = this.nearestFoe(); if (e) this.aimAt(e.head); }, CAST.W0 + 0.1);
+      yield* this.wait(0.9);
     }
+    if (g.fury < NOVA.need) g.fury = NOVA.need;
+    this.summon(6);
+    this.cap('The blast', 'Every kill charges it. When it is full, let it go: everything near you is struck at once.', 'nova');
+    yield* this.wait(2.6);
+    d.nova = true; yield* this.wait(1.5);
+    for (let n = 0; n < 12 && this.nearestFoe(); n++) yield* this.strike();
     d.cast = false;
     this.cap('Essence freed', 'A fallen guardian leaves essence of its own element. Hurt mends after five quiet seconds.', 'none');
     yield* this.wait(5);
@@ -549,8 +565,13 @@ export class Dev {
     yield* this.wait(1);
     for (let n = 0; n < 3; n++) yield* this.charged(() => { const e = this.nearestFoe(); if (e) this.aimAt(e.head); });
     g.state.sel = 'rewinder';
-    this.cap('The Rewinder: reverse', 'Shoot a guardian and it retraces its path home. It also un-falls collapsed rock.', 'time');
-    for (let t = 0; t < 3; t += this.dt) { const e = this.nearestFoe(); if (e) this.aimAt(e.pos); if (t > 1.2 && e && tw.cool.rewinder <= 0) d.time = true; yield; }
+    tw.cool.rewinder = 0;
+    this.cap('The Rewinder: mark', 'Press and every guardian near you is marked where it stands (the gold rings)', 'mark');
+    d.time = true; d.timeHeld = true;
+    for (let t = 0; t < 3.2; t += this.dt) { d.move.set(0, -0.8); yield; }
+    d.move.set(0, 0);
+    this.cap('The Rewinder: rewind', 'Let go, and each is hauled back to its mark, however close it had come', 'mark');
+    d.timeHeld = false; yield* this.wait(2.5);
     g.state.sel = 'seeds';
     this.cap('Quickening Seeds: speed up', 'Throw one: a tree lives its whole life in a breath, its roots seize foes and spent essence regrows.', 'time');
     for (let t = 0; t < 1.5; t += this.dt) { const e = this.nearestFoe(); this.aimAt(e ? e.pos : v1.copy(g.headSolar).addScaledVector(p.up, -1)); yield; }
@@ -628,6 +649,8 @@ export class Dev {
   update(dt) {
     this.dt = dt;
     this.applySun();
+    if (this.game.time.marks && this.heldMark && !this.demo) (this.input.debug ||= {}).timeHeld = true; else if (this.heldMark) { this.heldMark = false; if (this.input.debug && !this.demo) this.input.debug = null; }
+    if (this.dbgOnce) { (this.input.debug ||= {}).nova = true; this.dbgOnce = null; }
     if (this.demo) {
       const r = this.demo.next();
       if (r.done) this.stopDemo();

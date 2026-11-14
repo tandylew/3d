@@ -36,7 +36,7 @@ export class Input {
     this.touch = { on: false, move: new THREE.Vector2(), look: new THREE.Vector2(), cast: 0, time: false, cycle: false, jump: false, hud: false,
       combat: false,      // set by the game: is there something to attack? Then the open screen takes gestures instead of look-drags.
       gestures: [],       // { type: 'tap' | 'hold' | 'swipe', x, y (NDC), dx, dy, t, path }
-      holdT: -1, holdX: 0, holdY: 0 };
+      holdT: -1, holdX: 0, holdY: 0, timeHeld: false, nova: false };
     // Attacks this frame, whatever device made them:
     this.slashes = [];    // { pos (scene), dir, sweep, power }   melee sweeps (swing a controller, swipe the screen, V)
     this.shots = [];      // { ndc: [x, y], t }                   aimed casts from screen taps / holds
@@ -47,6 +47,8 @@ export class Input {
     this.cast = false;                    // elemental power, held
     this.timeEdge = false; this.cycleEdge = false; this.jumpEdge = false; this.hudEdge = false; this.flyEdge = false;
     this.select = -1;                     // direct time-relic choice (keys 1-4)
+    this.timeHeld = false;                // the relic control is down (the Rewinder marks on press, rewinds on release)
+    this.novaEdge = false;                // release the kill-charged blast
     this._held = {}; this._mouse = [false, false, false]; this._wheel = 0;
     this.dragLook = false; // dev dashboard: drag the view with the mouse instead of locking the pointer
     this._turnHeld = false; this._actHeld = false; this._keyEdges = [];
@@ -105,7 +107,7 @@ export class Input {
 
   frame(dt = 1 / 60) {
     this.turnEdge = 0; this.actEdge = false;
-    this.timeEdge = this.cycleEdge = this.jumpEdge = this.hudEdge = this.flyEdge = false; this.cast = false; this.select = -1;
+    this.timeEdge = this.cycleEdge = this.jumpEdge = this.hudEdge = this.flyEdge = this.novaEdge = false; this.cast = false; this.select = -1; this.timeHeld = false;
     this.move.set(0, 0); this.lift = 0; this.slashes.length = 0; this.shots.length = 0; this.aimNdc = null; this._dt = dt;
     for (const h of [this.left, this.right]) { h.trigger = 0; h.grip = 0; h.active = false; h.pad = null; }
     const session = this.renderer.xr.getSession();
@@ -121,6 +123,8 @@ export class Input {
       if (d.cast) this.cast = true;
       if (d.slash) { this.slashes.push(d.slash); d.slash = null; }
       if (d.time) { this.timeEdge = true; d.time = false; }
+      if (d.timeHeld) this.timeHeld = true;
+      if (d.nova) { this.novaEdge = true; d.nova = false; }
       if (d.jump) { this.jumpEdge = true; d.jump = false; }
       if (d.cycle) { this.cycleEdge = true; d.cycle = false; }
       if (d.fly !== undefined) this.flyMode = d.fly;
@@ -163,6 +167,7 @@ export class Input {
         if (Math.hypot(ax, ay) > 0.15) this.move.set(ax, -ay);
         // left hand: grip uses the time relic, X leaps, Y shows the objectives
         if (this.edge('lg', h.grip > 0.6)) this.timeEdge = true;
+        if (h.grip > 0.6) this.timeHeld = true;
         if (this.edge('lx', b(gp, 4))) this.jumpEdge = true;
         if (this.edge('ly', b(gp, 5))) this.hudEdge = true;
       } else {
@@ -172,6 +177,7 @@ export class Input {
         if (h.grip > 0.6) this.cast = true;
         if (this.edge('ra', b(gp, 4))) this.jumpEdge = true;
         if (this.edge('rb', b(gp, 5))) this.cycleEdge = true;
+        if (this.edge('rs', b(gp, 3))) this.novaEdge = true;        // click the right stick: the blast
       }
       if (c.model) c.model.userData.orb.scale.setScalar(0.5 + h.trigger * 0.5 + h.grip * 0.4);
     }
@@ -204,11 +210,13 @@ export class Input {
       else if (code === 'KeyF') this.flyEdge = true;
       else if (code === 'KeyE' || code === 'Mouse2') this.timeEdge = true;
       else if (code === 'KeyQ') this.cycleEdge = true;
+      else if (code === 'KeyG') this.novaEdge = true;
       else if (code === 'KeyH' || code === 'Tab') this.hudEdge = true;
       else if (code === 'KeyV' || code === 'Mouse1') this.slashes.push({ pos: h.pos.clone(), dir: h.dir.clone(), sweep: new THREE.Vector3(1, 0.25 * (Math.random() - 0.5), 0).applyQuaternion(cam.getWorldQuaternion(new THREE.Quaternion())).normalize(), power: 0.7 });
       else if (/^Digit[1-4]$/.test(code)) this.select = Number(code[5]) - 1;
     }
     if (this._wheel) this.cycleEdge = true;
+    this.timeHeld = k.has('KeyE') || this._mouse[2] || (t.on && !!t.timeHeld);
     if (t.on) {
       // screen gestures: a swipe is a blade across the view, a tap or a held press is a cast at that point
       for (const ge of t.gestures) {
@@ -221,6 +229,7 @@ export class Input {
       t.gestures.length = 0;
       if (t.holdT >= 0) this.aimNdc = [t.holdX, t.holdY];
       if (t.time) { this.timeEdge = true; t.time = false; }
+      if (t.nova) { this.novaEdge = true; t.nova = false; }
       if (t.cycle) { this.cycleEdge = true; t.cycle = false; }
       if (t.jump) { this.jumpEdge = true; t.jump = false; }
       if (t.hud) { this.hudEdge = true; t.hud = false; }

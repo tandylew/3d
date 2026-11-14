@@ -47,7 +47,7 @@ export class Hud {
     this.toastT = 0; this.toastQueue = []; this.toastText = null;
     this.markers = new Map();
     this.tick = 0; this.wristTimer = 0;
-    this.markersOn = true; this.flatKey = '';
+    this.markersOn = true; this.flatKey = ''; this.guides = false;
     // The objectives panel stays out of the way until asked for.
     this.showObjectives = false;
     this.wrist.mesh.visible = false;
@@ -69,9 +69,19 @@ export class Hud {
     camera.add(this.veil);
   }
 
+  // Guidance (hints, tutorials, prompts) is off unless `guides` is switched on
+  // from the dev dashboard: it crowded the screen. What remains are notes.
   say(title, sub = '', seconds = 5, color = '#ffffff') {
+    if (!this.guides) return;
     this.toastQueue.push({ title, sub, seconds, color });
     if (this.toastQueue.length > 3) this.toastQueue.shift();
+  }
+
+  // A note: one short line for something that just happened (a place reached,
+  // a thing won). Never instructions. Only the latest waits its turn.
+  note(title, color = '#ffffff', seconds = 2.6) {
+    this.toastQueue.length = 0;
+    this.toastQueue.push({ title, sub: '', seconds, color, note: true });
   }
 
   setRadar(blips) { this.blips = blips; this.radarDirty = true; }
@@ -125,6 +135,13 @@ export class Hud {
     ctx.fillStyle = hp > 0.5 ? '#7be08a' : hp > 0.25 ? '#ffc65c' : '#ff6b5c';
     if (hp > 0.02) { rr(ctx, x + 6, 42, 288 * hp, 36, 18); ctx.fill(); }
     x += 324;
+    // the blast: fills with kills, glows when ready
+    if (s.fury > 0) {
+      ctx.fillStyle = 'rgba(6,10,22,0.6)'; ctx.beginPath(); ctx.arc(x + 30, 60, 30, 0, 6.3); ctx.fill();
+      ctx.strokeStyle = '#ffe9a8'; ctx.lineWidth = 8; ctx.beginPath(); ctx.arc(x + 30, 60, 22, -Math.PI / 2, -Math.PI / 2 + s.fury * 6.283); ctx.stroke();
+      if (s.fury >= 1) { ctx.fillStyle = '#ffe9a8'; ctx.beginPath(); ctx.arc(x + 30, 60, 12, 0, 6.3); ctx.fill(); }
+      x += 74;
+    }
     // essence you carry (only what you have)
     for (const el of ELEMENT_ORDER) {
       const n = s.inv[el]; if (!n) continue;
@@ -135,7 +152,7 @@ export class Hud {
       x += 92;
     }
     // time relic
-    if (s.weapon) {
+    if (s.weapon && !this.input.touch.on) {
       const w = s.weapon, label = w.short + (w.count != null ? ` ${w.count}` : '');
       ctx.font = `700 28px ${FONT}`;
       const tw = ctx.measureText(label).width + 44;
@@ -149,9 +166,18 @@ export class Hud {
   drawToast(m) {
     const { ctx, canvas, tex } = this.toast;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (m.note) {
+      // a slim pill, just wide enough for its words
+      ctx.font = `700 54px ${FONT}`;
+      const w = Math.min(980, ctx.measureText(m.title).width + 90);
+      ctx.fillStyle = 'rgba(6,10,22,0.55)'; rr(ctx, 512 - w / 2, 80, w, 96, 48); ctx.fill();
+      ctx.fillStyle = m.color; ctx.fillText(m.title, 512, 130, 940);
+      tex.needsUpdate = true;
+      return;
+    }
     ctx.fillStyle = 'rgba(6,10,22,0.72)'; rr(ctx, 8, 8, 1008, 240, 36); ctx.fill();
     ctx.strokeStyle = m.color; ctx.globalAlpha = 0.7; ctx.lineWidth = 4; ctx.stroke(); ctx.globalAlpha = 1;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillStyle = m.color; ctx.font = `700 ${m.sub ? 62 : 70}px ${FONT}`;
     ctx.fillText(m.title, 512, m.sub ? 92 : 128, 960);
     if (m.sub) { ctx.fillStyle = '#c9d6ee'; ctx.font = `400 40px ${FONT}`; ctx.fillText(m.sub, 512, 172, 960); }
@@ -271,7 +297,7 @@ export class Hud {
 
     // --- vitals strip
     const vm = this.vitals.mesh, cam = this.camera;
-    const vkey = [Math.round(state.health), ELEMENT_ORDER.map((e) => state.inv[e]).join(), state.castEl, state.weapon ? state.weapon.short + state.weapon.count + state.weapon.ready : ''].join('|');
+    const vkey = [Math.round(state.health), state.fury, ELEMENT_ORDER.map((e) => state.inv[e]).join(), state.castEl, state.weapon ? state.weapon.short + state.weapon.count + state.weapon.ready : ''].join('|');
     if (vkey !== this.vitalsKey) { if (this.vitalsKey) this.poke(); this.vitalsKey = vkey; this.drawVitals(state); }
     if (state.health < 99.5) this.poke(1);
     this.vitalsT -= dt;
@@ -298,7 +324,7 @@ export class Hud {
     const target = this.toastT > 0 ? Math.min(1, this.toastT * 2, (this.toastText.seconds - this.toastT) * 3) : 0;
     t.material.opacity += (target - t.material.opacity) * Math.min(1, dt * 10);
     t.visible = t.material.opacity > 0.01;
-    t.scale.setScalar(this.input.xr ? 1 : this.toastScale || 1);
+    t.scale.setScalar((this.input.xr ? 1 : this.toastScale || 1) * (this.toastText && this.toastText.note ? 0.62 : 1));
     a.set(0, 0, -1).applyQuaternion(this.camera.quaternion); a.y = 0;
     if (a.lengthSq() < 1e-4) a.set(0, 0, -1);
     a.normalize();

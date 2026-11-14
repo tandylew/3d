@@ -94,6 +94,10 @@ export class Timeworks {
     this.cool = { rewinder: 0, mantle: 0 };
     this.slowT = 0; this.freezeT = 0; this.echo = null; this.slowLen = 6; this.freezeLen = 5; this.coolK = 1;
     this.anoms = new Map(); this.blooms = []; this.grenades = [];
+    this.marks = null; this.markT = 0;
+    this.markMesh = new THREE.InstancedMesh(new THREE.TorusGeometry(1.5, 0.12, 6, 28), glowMaterial(WEAPONS.rewinder.rgb, 1.0, 1.6), 48);
+    this.markMesh.frustumCulled = false; this.markMesh.count = 0; this.markMesh.renderOrder = 7;
+    scene.add(this.markMesh);
     this.rnd = mulberry32(99); this.hinted = {};
     // Rewinder beam
     this.beamU = { uColor: { value: new THREE.Vector3(1, 0.72, 0.3) }, uTime: ENV.uTime, uAlpha: { value: 0 } };
@@ -151,9 +155,9 @@ export class Timeworks {
     let ready = true, count = null;
     if (id === 'pearls') { count = this.pearls.n; ready = count > 0 && this.slowT <= 0; }
     else if (id === 'seeds') { count = this.seeds.n; ready = count > 0; }
-    else if (id === 'rewinder') ready = this.cool.rewinder <= 0;
+    else if (id === 'rewinder') ready = !!this.marks || this.cool.rewinder <= 0;
     else ready = !!this.echo || this.cool.mantle <= 0;
-    return { id, name: w.name, short: id === 'mantle' && this.echo ? 'RETURN' : SHORT[id], css: w.css, ready, count, many: this.list().length > 1 };
+    return { id, name: w.name, short: id === 'mantle' && this.echo ? 'RETURN' : id === 'rewinder' && this.marks ? 'RELEASE' : SHORT[id], css: w.css, ready, count, many: this.list().length > 1 };
   }
 
   give(id) {
@@ -161,6 +165,7 @@ export class Timeworks {
     if (s.weapons[id]) return;
     s.weapons[id] = true; if (!WEAPONS[id].passive) s.sel = id;
     const w = WEAPONS[id], L = this.game.labels();
+    this.game.hud.note(w.name, w.css, 3.5);
     this.game.hud.say(`${w.name} acquired`, w.lore, 7, w.css);
     if (!w.passive) this.game.hud.say(`${w.verb}: ${L.time}`, this.list().length > 1 ? `Switch relics with ${L.cycle}` : `A relic of ${PLANET_BY_ID[w.world].name}`, 6, w.css);
     this.game.audio.relic?.();
@@ -200,6 +205,28 @@ export class Timeworks {
     }
     g.hud.poke();
     return true;
+  }
+
+  // The Rewinder, first half: press, and every guardian near you is marked where it stands.
+  beginMark() {
+    const g = this.game;
+    if (this.marks || this.cool.rewinder > 0) { if (!this.marks) g.audio.tone(110, 0.15, 'square', 0.06); return false; }
+    this.marks = g.combat.mark(g.headSolar, 110); this.markT = 0;
+    g.audio.tone(520, 0.3, 'sawtooth', 0.07, 0, 1.6);
+    g.hud.poke();
+    return true;
+  }
+
+  // Second half: release, and each is hauled back to its mark. Their bolts in
+  // flight are unmade and eruptions about to burst near you un-happen.
+  releaseMark() {
+    const g = this.game, marks = this.marks; if (!marks) return 0;
+    this.marks = null; this.cool.rewinder = 3.5 * this.coolK;
+    const n = g.combat.rewindTo(marks);
+    g.trials.undoAround(g.headSolar, 70);
+    g.audio.sweep(0.5, 4000, 300, 0.35); g.audio.tone(520, 0.4, 'sawtooth', 0.08, 0, 0.4);
+    g.hud.poke();
+    return n;
   }
 
   recall() {
@@ -344,6 +371,19 @@ export class Timeworks {
         if (dist < 5.5) this.give(a.weapon);
       }
     }
+
+    // rewind marks: a gold ring where each marked guardian stood, tightening while you hold
+    let mk = 0;
+    if (this.marks) {
+      this.markT += raw;
+      for (const m of this.marks) {
+        if (mk >= 48) break;
+        q1.setFromUnitVectors(Y, v1.copy(m.pos).sub(P.pos).normalize());
+        m4.compose(v2.copy(m.pos).sub(pl.pos), q1.multiply(new THREE.Quaternion().setFromAxisAngle(Y, -this.markT * 3)), sv.setScalar(1.2 + 0.25 * Math.sin(this.markT * 8)));
+        this.markMesh.setMatrixAt(mk++, m4);
+      }
+    }
+    this.markMesh.count = mk; this.markMesh.instanceMatrix.needsUpdate = true;
 
     // echo
     const e = this.echo;

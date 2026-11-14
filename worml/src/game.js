@@ -21,7 +21,9 @@ const QUEST = ['thalassa', 'pyra', 'ferrum', 'sylva', 'petra', 'arcana'];
 const SOURCE = { water: 'thalassa', fire: 'pyra', metal: 'ferrum', wood: 'sylva', earth: 'petra', magic: 'arcana' };
 const CAP = 12;
 // Casting: hold to gather the charge, let go inside the resonance window for a perfect cast.
-export const CAST = { W0: 0.7, W1: 0.98, MAX: 1.7 };
+export const CAST = { W0: 0.7, W1: 1.7, MAX: 1.7 };
+// The blast: charged by kills, released around you.
+export const NOVA = { need: 5, radius: 17, dmg: 150 };
 
 const headScene = new THREE.Vector3(), headLocal = new THREE.Vector3(), playerLocal = new THREE.Vector3();
 const gl = new THREE.Vector3(), v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), camUp = new THREE.Vector3(), camQ = new THREE.Quaternion();
@@ -61,7 +63,7 @@ export class Game {
     this.started = false; this.clock = 0; this.worldTime = 0;
     this.health = 100; this.hurtT = 99; this.hurtFlash = 0; this.dead = null;
     this.castCool = 0; this.castEl = null; this.told = {}; this.tellT = {};
-    this.chargeT = -1; this.castLock = false; this.forceEl = null; this.lastHit = null; this.lastCast = ''; this.radarT = 0;
+    this.fury = 0; this.chargeT = -1; this.castLock = false; this.forceEl = null; this.lastHit = null; this.lastCast = ''; this.radarT = 0;
     this.chargeOrb = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 2), glowMaterial([1, 1, 1], 1.6, 1.5));
     this.chargeOrb.visible = false; this.chargeOrb.frustumCulled = false; this.chargeOrb.renderOrder = 8;
     scene.add(this.chargeOrb);
@@ -123,14 +125,13 @@ export class Game {
   castPower(t) {
     const { W0, W1, MAX } = CAST;
     if (t < W0) { const f = t / W0; return { dmg: 14 + 26 * f * f, speed: 110 + 40 * f, size: 0.26 + 0.12 * f, perfect: false, label: f < 0.25 ? 'quick' : 'early' }; }
-    if (t <= W1) return { dmg: 72, speed: 240, size: 0.62, perfect: true, label: 'perfect' };
-    const f = Math.min(1, (t - W1) / (MAX - W1));
-    return { dmg: 34 - 22 * f, speed: 120, size: 0.34, perfect: false, label: 'overheld' };
+    // fully charged: a burst. With a guardian to go after it homes and destroys; otherwise it flies straight.
+    return { dmg: 72, speed: 240, size: 0.62, perfect: true, label: 'burst' };
   }
 
   // Say something once per `gap` seconds at most (hints that could otherwise nag).
   tell(key, gap, title, sub, sec = 5, css = '#ffffff') {
-    if ((this.tellT[key] || -1e9) + gap > this.clock) return;
+    if (!this.hud.guides || (this.tellT[key] || -1e9) + gap > this.clock) return;
     this.tellT[key] = this.clock;
     this.hud.say(title, sub, sec, css);
   }
@@ -198,10 +199,10 @@ export class Game {
     gate.setOpen(true);
     this.updateDests();
     this.audio.unlock();
-    this.hud.say(`${def.name}'s well is open`, 'Step into the shaft: its gate hangs at the core of the world', 8, ELEMENTS[def.element].css);
+    this.hud.note(`${def.name}'s well is open`, ELEMENTS[def.element].css);
     if (QUEST.every((q) => s.open[q])) {
       s.won = true; this.player.arena = ARENA;
-      this.hud.say('Every world is linked', 'And the star has noticed. Fly to the Sun: the Heliarch is waking.', 14, '#ffe9a8');
+      this.hud.note('Every world is linked. The Sun wakes.', '#ffe9a8', 5);
       this.audio.win();
     }
     this.save();
@@ -264,7 +265,7 @@ export class Game {
     this.dead = { t: 0, moved: false };
     this.player.frozen = true;
     this.audio.tone(60, 1.6, 'sawtooth', 0.2, 0, 0.3);
-    this.hud.say('You are unmade', 'Half your essence scatters. You gather yourself at the wellhead.', 6, '#ff8a7a');
+    this.hud.note('You are unmade', '#ff8a7a');
   }
 
   onAggro(e) {
@@ -283,7 +284,20 @@ export class Game {
     if (b.perfect) this.audio.tone(1040, 0.25, 'sine', 0.1, 0.03);
   }
 
-  onKill() { /* drop is handled by Combat */ }
+  // every kill feeds the blast
+  onKill() { if (this.fury < NOVA.need) { this.fury++; if (this.fury === NOVA.need) { this.audio.tone(880, 0.4, 'sine', 0.14); this.audio.tone(1320, 0.5, 'sine', 0.1, 0.1); this.hud.poke(); } } }
+
+  // Throw a fully charged cast: at a guardian it becomes a homing burst (two essence if you have it).
+  throwCast(origin, dir, el, pw) {
+    const s = this.state, target = pw.perfect ? this.combat.pickTarget(origin, dir) : null;
+    s.inv[el]--;
+    if (target) { if (s.inv[el] > 0) s.inv[el]--; this.combat.burst(origin, dir, el, target); }
+    else this.combat.castPlayer(origin, dir, el, pw);
+    this.time.echoCast(el, pw);
+    this.lastCast = pw.label;
+    this.audio.tone(el === 'fire' ? 180 : el === 'water' ? 420 : 300, 0.2, 'triangle', pw.perfect ? 0.2 : 0.12, 0, pw.perfect ? 3 : 2.2);
+    this.hud.poke(); this.save();
+  }
 
   // Which element a cast along this ray should spend: what the thing you are
   // aiming at is weak to, if you carry it; otherwise whatever you hold most of.
@@ -342,7 +356,7 @@ export class Game {
         this.transit = null;
         this.player.frozen = false;
         const def = tr.to.planet.def;
-        this.hud.say(`Core of ${def.name}`, `${this.labels().jump} to ride the shaft up to the surface`, 6, ELEMENTS[def.element].css);
+        this.hud.note(`Core of ${def.name}`, ELEMENTS[def.element].css);
         alpha = 0;
       }
     }
@@ -354,6 +368,7 @@ export class Game {
     const el = this.castEl;
     return { castCss: el ? ELEMENTS[el].css : null, castCount: el ? this.state.inv[el] : 0, weapon: this.time.current(),
       w0: CAST.W0, w1: CAST.W1,
+      leaping: this.player.leaping, nova: this.fury >= NOVA.need,
       charge: this.chargeT < 0 ? 0 : Math.min(1, this.chargeT / CAST.W0), perfect: this.chargeT >= CAST.W0 && this.chargeT <= CAST.W1 };
   }
 
@@ -372,8 +387,9 @@ export class Game {
     if (this.started && !this.transit && !this.dead) {
       if (input.hudEdge) hud.toggleObjectives();
       if (input.flyEdge && !input.touch.on) hud.say(input.flyMode ? 'Flight on' : 'Flight off', input.flyMode ? 'Forward flies where you look. You hover when still.' : 'You walk, and fall if in the air.', 1.6);
-      if (input.jumpEdge && player.jump()) {
-        this.audio.sweep(0.9, 300, 2400, 0.3);
+      const airborne = !player.inside && !player.grounded && player.alt > 8;
+      if (input.jumpEdge && (player.leaping ? player.amp() : airborne && input.flyMode && !input.xr ? player.bail(input) : player.jump())) {
+        this.audio.sweep(0.9, player.dive ? 2400 : 300, player.dive ? 300 : 2400, 0.3);
         if (player.inside) this.tell('ride', 30, 'Riding the shaft', 'Up to the wellhead', 3);
         else if (!this.told.leap) { this.told.leap = true; hud.say('Leap!', `Again in the air to go higher. ${L.fly} to steer.`, 5); }
       }
@@ -413,7 +429,16 @@ export class Game {
 
     // ---- relics and guardians
     const tHand = input.xr ? input.left : input.right;
-    if (this.started && !this.transit && !this.dead && input.timeEdge) this.time.use(tHand);
+    if (this.started && !this.transit && !this.dead && input.timeEdge) { if (s.sel === 'rewinder' && this.time.has('rewinder')) this.time.beginMark(); else this.time.use(tHand); }
+    if (this.time.marks && (!input.timeHeld || this.time.markT > 6)) this.time.releaseMark();
+    // ---- the blast: five kills charge it; it strikes everything round you
+    if (input.novaEdge && this.fury >= NOVA.need && this.started && !this.transit && !this.dead) {
+      this.fury = 0;
+      const el = this.pickElement(this.headSolar, input.right.dir);
+      combat.nova(this.headSolar.clone(), NOVA.radius, NOVA.dmg, el ? ELEMENTS[el].rgb : [1, 0.92, 0.7]);
+      for (const h of [input.left, input.right]) input.pulse(h, 1, 150);
+      hud.poke();
+    }
     this.time.update(dt, time, headLocal);
     this.trials.update(dt * ws, dt, wt, headLocal);
     combat.update(dt * ws, dt, wt);
@@ -449,12 +474,7 @@ export class Game {
       const dir = v2.set(sh.ndc[0], sh.ndc[1], 0.5).unproject(this.camera).sub(headScene.setFromMatrixPosition(this.camera.matrixWorld)).normalize().clone();
       const o = v1.copy(input.right.pos).add(player.pos).clone(), el = this.pickElement(o, dir), pw = this.castPower(sh.t);
       if (!el) { combat.slash(o, dir, v2.set(1, 0, 0).applyQuaternion(this.camera.getWorldQuaternion(camQ)), null, 0.5, false); this.tell('empty', 8, 'No essence to cast', 'Swipe to strike instead, or win some at a trial', 3); continue; }
-      s.inv[el]--;
-      combat.castPlayer(o, dir, el, pw); this.time.echoCast(el, pw);
-      this.lastCast = pw.label;
-      this.audio.tone(el === 'fire' ? 180 : el === 'water' ? 420 : 300, 0.2, 'triangle', pw.perfect ? 0.2 : 0.12, 0, pw.perfect ? 3 : 2.2);
-      if (pw.perfect) this.tell('perfect', 10, 'Perfect cast', 'Faster, three times the force, and it punches through', 2, ELEMENTS[el].css);
-      hud.poke(); this.save();
+      this.throwCast(o, dir, el, pw);
     }
 
     // ---- casting: hold to charge, release to throw. Let go inside the short
@@ -468,15 +488,8 @@ export class Game {
       const el = this.castEl || this.chargeEl, pw = this.castPower(this.chargeT);
       this.chargeT = -1; this.castCool = 0.12;
       if (!el || s.inv[el] <= 0) return;
-      s.inv[el]--;
-      combat.castPlayer(origin, aim, el, pw);
-      this.time.echoCast(el, pw);
-      this.lastCast = pw.label;
-      this.audio.tone(el === 'fire' ? 180 : el === 'water' ? 420 : 300, 0.2, 'triangle', pw.perfect ? 0.2 : 0.12, 0, pw.perfect ? 3 : 2.2);
+      this.throwCast(origin, aim, el, pw);
       input.pulse(input.right, pw.perfect ? 1 : 0.4, pw.perfect ? 90 : 40);
-      if (pw.perfect) this.tell('perfect', 10, 'Perfect cast', 'Faster, three times the force, and it punches through', 2, ELEMENTS[el].css);
-      else if (pw.label === 'overheld') this.tell('over', 12, 'Held too long', 'The charge sours after the flash. Release on it.', 2.5);
-      hud.poke(); this.save();
     };
     if (input.cast && canCast && !this.castLock) {
       if (this.chargeT < 0) {
@@ -556,7 +569,7 @@ export class Game {
       if (alt < 400 && !s.visited[id]) {
         s.visited[id] = true;
         const n = Object.keys(s.visited).length;
-        if (n > 1) { hud.say(`${def.name} · ${def.title}`, `World ${n} of 6 discovered`, 6, ELEMENTS[def.element].css); this.audio.discover(); }
+        if (n > 1) { hud.note(`${def.name} · ${def.title}`, ELEMENTS[def.element].css); this.audio.discover(); }
         this.save();
       }
     }
@@ -640,7 +653,7 @@ export class Game {
       css: ELEMENTS[def.element].css, linked: s.order.length, visited: Object.keys(s.visited).length,
       objective: obj.lines, inv: s.inv, speed: player.speed, alt,
       place: ad < 3000 ? 'The ring before the Sun' : inside ? `Inside ${def.name}` : alt < def.radius * 0.6 ? `${def.name} · ${def.title}` : `Deep space · nearest world ${def.name}`,
-      health: this.health, castEl: this.castEl, weapon: this.time.current(),
+      health: this.health, castEl: this.castEl, weapon: this.time.current(), fury: this.fury / NOVA.need,
     });
     this.audio.update(player.speed, player.thrusting, def.element, inside ? 1 : 1 - smoothstep(def.radius * 0.05, def.radius * 0.9, alt));
 

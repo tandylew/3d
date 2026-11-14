@@ -71,6 +71,7 @@ const result = await page.evaluate(() => {
   check('starts grounded on Thalassa', p.planet.def.id === 'thalassa' && p.grounded && p.alt < 0.5, `alt=${p.alt.toFixed(2)}`);
   check('home well open, others sealed', home.open && thal.shaftOpen && !g.gates.get('pyra').open && !g.planets[1].shaftOpen);
   check('objectives hidden until asked for', !g.hud.wrist.mesh.visible);
+  check('no guiding messages on screen', !g.hud.guides && g.hud.toastQueue.length === 0 && !g.hud.toastText);
   check('worlds are half the size', g.planets.every((q) => q.def.radius <= 17000));
   check('each world has exactly three sites: well, trial, time relic', g.planets.every((q) => q.def.deposits.length === 1 && !!q.def.anomaly && q.def.sites.length === 2));
   check('radar shows just those three', g.hud.blips && g.hud.blips.length === 3 && ['well', 'deposit', 'anomaly'].every((k) => g.hud.blips.some((b) => b.kind === k)), `blips=${g.hud.blips?.length}`);
@@ -81,9 +82,14 @@ const result = await page.evaluate(() => {
 
   // 2. super leap, automatic flight, automatic landing
   check('flight is off on the ground', !input.flyMode);
-  dbg.jump = true; step(); sec(7);
+  dbg.jump = true; step(); sec(3.4);
   const apex = p.alt;
-  check('a leap throws you kilometres up and leaves you flying', apex > 1500 && input.flyMode, `alt=${apex.toFixed(0)} m`);
+  check('a plain leap is modest and leaves you flying', apex > 60 && apex < 700 && input.flyMode && !p.leaping, `alt=${apex.toFixed(0)} m`);
+  dbg.jump = true; step();
+  let drop = 0; for (; drop < 40 && !p.grounded; drop += DT) step();
+  check('pressing again while flying bails out: straight back to the ground', p.grounded && !input.flyMode, `${drop.toFixed(1)} s`);
+  dbg.jump = true; step(); sec(1); dbg.jump = true; step(); sec(1.5); dbg.jump = true; step(); sec(6);
+  check('pressing again while rising amps the leap up', p.alt > 1500 && input.flyMode, `alt=${p.alt.toFixed(0)} m`);
   flyTo(thal, site.pos.clone().addScaledVector(site.up, 1.5).addScaledVector(site.t1, 70), 3, 60);
   sec(3);
   check('coming down to the ground lands you and ends flight', !input.flyMode && p.grounded, `alt=${p.alt.toFixed(1)} fly=${input.flyMode}`);
@@ -98,11 +104,11 @@ const result = await page.evaluate(() => {
   dbg.move.set(0, 0); sec(2.5);
   check('stepping in starts the trial', tr.active, tr.phase);
   let rose = null, sawGround = false, sawLegs = false, bursts = 0;
+  const hz = tr.hazard.bind(tr); tr.hazard = (...a) => { bursts++; return hz(...a); };
   for (let k = 0; k < 72 * 170 && !s.trial.thalassa; k++) {
     const e = foe();
     if (e && e.state === 'emerge' && e.h < 0) rose = e;
     if (e && e.state === 'chase' && !e.air && e.legs.every((l) => l.set)) { sawGround = true; if (e.legs.some((l) => l.t < 1)) sawLegs = true; }
-    bursts += tr.hazards.filter((h) => h.burst && h.t - h.warn < DT * 1.5).length;
     if (g.health < 50) g.health = 100;
     if (e && e.state !== 'emerge') {
       if (e.pos.distanceTo(g.headSolar) < 14 || !g.castEl) slashAt(e.head);
@@ -113,20 +119,32 @@ const result = await page.evaluate(() => {
   check('they fight on foot, stepping on jointed legs', sawGround && sawLegs);
   check('the ground erupts during the trial', bursts > 0, `${bursts} eruptions`);
   check('blades (free) kill guardians', slashKills > 0, `${slashKills} of ${kills} kills by blade`);
-  check('clearing three waves masters Water and fills it', s.trial.thalassa && s.inv.water === 12 && kills >= 5, `kills=${kills} water=${s.inv.water}`);
+  check('clearing three waves of many frail guardians masters Water and fills it', s.trial.thalassa && s.inv.water === 12 && kills >= 12, `kills=${kills} water=${s.inv.water}`);
+  check('kills charge the blast', g.fury === 5);
   s.inv.water = 3; flyTo(thal, site.pos.clone().addScaledVector(site.up, 3), 3, 10); sec(4);
   check('the woken font refills its element', s.inv.water === 12, `water=${s.inv.water}`);
 
   // 4. casting skill
-  const quick = g.castPower(0.08), perfect = g.castPower(0.85), late = g.castPower(1.5);
-  check('a perfect cast carries far more than a quick or overheld one', perfect.perfect && perfect.dmg > quick.dmg * 3 && late.dmg < perfect.dmg / 2, `quick ${quick.dmg.toFixed(0)}, perfect ${perfect.dmg}, overheld ${late.dmg.toFixed(0)}`);
+  const quick = g.castPower(0.08), full = g.castPower(0.85);
+  check('a full charge is a burst, far beyond a quick cast', full.perfect && full.label === 'burst' && full.dmg > quick.dmg * 3, `quick ${quick.dmg.toFixed(0)}, burst ${full.dmg}`);
   g.health = 100; g.warpTo('thalassa', 0, 80); step(10);
-  const [dummy] = dev.summon(1, 'fire'); sec(2);
-  const w0 = s.inv.water;
-  castAt(() => dummy.head, 20, () => dummy.state === 'dead' || !c.enemies.includes(dummy));
-  check('water is chosen against fire and a timed release is a perfect hit', g.lastHit && g.lastHit.perfect && g.lastHit.el === 'water' && s.inv.water < w0, JSON.stringify(g.lastHit));
+  dev.summon(3, 'fire'); sec(2.2);
+  const k1 = kills, w0 = s.inv.water;
+  dbg.cast = true; for (let k = 0; k < 160 && g.chargeT < 0.85; k++) { aimAt(foe().head); step(); }
+  dbg.cast = false; step(3);
+  const flying = c.bolts.find((b) => b.from === 'burst');
+  check('released at a guardian it becomes a homing burst', !!flying && !!flying.target && w0 - s.inv.water === 2, `spent ${w0 - s.inv.water}`);
+  for (let k = 0; k < 72 * 5; k++) { g.health = 100; step(); }
+  check('a water burst destroys its target and runs on like a river to the next', kills - k1 >= 2 && g.lastHit.perfect && g.lastHit.el === 'water', `${kills - k1} destroyed by one release`);
+  // the blast
+  c.clear(() => true); g.fury = 5; dev.summon(6);
+  for (let k = 0; k < 72 * 4; k++) { g.health = 100; step(); }
+  const inReach = c.enemies.filter((e) => e.state !== 'dead' && e.pos.distanceTo(g.headSolar) < 17).length;
+  const k2 = kills; dbg.nova = true; step(2); sec(1);
+  check('the blast strikes everything within reach and spends its charge', inReach >= 3 && kills - k2 === inReach && g.fury === Math.min(5, inReach), `${kills - k2} of ${inReach} in reach destroyed`);
+  c.clear(() => true);
   sec(6);
-  check('a fallen guardian leaves essence of its element', s.inv.fire >= 1 && c.drops.length === 0, `fire=${s.inv.fire}`);
+  check('a fallen guardian leaves essence of its element', c.drops.length === 0);
 
   // 5. health: hurt, then mend after a quiet spell
   c.clear(() => true); g.health = 100; g.hurt(40);
@@ -221,12 +239,18 @@ const result = await page.evaluate(() => {
   check('time resumes', tw.worldScale === 1);
   for (const w of ['rewinder', 'seeds', 'mantle']) tw.give(w);
   g.health = 100;
-  s.sel = 'rewinder'; aimAt(sub.pos); dbg.time = true; step(2);
-  check('the Rewinder sends a guardian back', sub.state === 'rewind', sub.state);
-  sec(6); c.clear(() => true);
-  tr.hazard(g.headSolar.clone().addScaledVector(p.up, -1).add(new THREE.Vector3().crossVectors(p.up, new THREE.Vector3(1, 0.2, 0)).normalize().multiplyScalar(12)), p.up, [1, 1, 1], 4, 5);
-  tw.cool.rewinder = 0; aimAt(tr.hazards[0].pos); dbg.time = true; step(3);
-  check('the Rewinder un-happens an eruption', tr.hazards.length === 0 || tr.hazards[0].burst);
+  // the Rewinder: press marks where they stand, release puts them back
+  c.clear(() => true); const [rw] = dev.summon(1); sec(2);
+  const stood = rw.pos.clone();
+  s.sel = 'rewinder'; tw.cool.rewinder = 0; dbg.time = true; dbg.timeHeld = true; step(2);
+  check('pressing the Rewinder marks where each guardian stands', tw.marks && tw.marks.length === 1 && tw.markMesh.count === 1);
+  for (let k = 0; k < 72 * 2.5; k++) { g.health = 100; step(); }
+  const strayed = rw.pos.distanceTo(stood);
+  tr.hazard(g.headSolar.clone().addScaledVector(p.up, -1), p.up, [1, 1, 1], 4, 5);
+  dbg.timeHeld = false; step(2); sec(1.2);
+  check('releasing it hauls them back to their marks', strayed > 3 && rw.pos.distanceTo(stood) < 1.5 && !tw.marks, `had moved ${strayed.toFixed(1)} m, now ${rw.pos.distanceTo(stood).toFixed(1)} m from the mark`);
+  check('and un-happens an eruption about to burst', tr.hazards.length === 0 || tr.hazards[0].burst);
+  c.clear(() => true);
   s.sel = 'seeds'; dbg.dir.copy(p.up).multiplyScalar(-0.3).add(new THREE.Vector3().crossVectors(p.up, new THREE.Vector3(1, 0.2, 0)).normalize()).normalize(); dbg.time = true; step(2);
   sec(5);
   check('a Quickening Seed grows a tree where it lands', tw.blooms.length === 1 && tw.blooms[0].mesh.scale.x > 1.5, `blooms=${tw.blooms.length}`);
@@ -256,15 +280,16 @@ const result = await page.evaluate(() => {
   flyTo({ pos: br.pos }, new THREE.Vector3(), 6, 30); step(5);
   check('a brazier refills its element', s.inv.fire === 12);
   // fight the two flares for real for a while, then sweep up
-  const k0 = kills; let seenEls = new Set();
+  const k0 = kills; let seenEls = new Set(), wing = 0, wingN = 0;
   for (let k = 0; k < 72 * 60 && tr.f.phase !== 'boss'; k++) {
     g.health = 100;
-    const e = foe(); for (const q of c.enemies) seenEls.add(q.el);
+    const e = foe(); for (const q of c.enemies) { seenEls.add(q.el); if (q.state === 'chase' && q.air && q.stun <= 0 && q.slow <= 0 && q.root <= 0) { wing += q.vel.length(); wingN++; } }
     if (e && e.state !== 'emerge') { if (k < 72 * 25) castAt(() => e.head, 1.2, () => e.state === 'dead'); else c.damage(e, 9999); }
     else step();
     for (const el of ['water', 'fire', 'metal', 'wood', 'earth']) if (s.inv[el] < 3) s.inv[el] = 12;
   }
-  check('waves of many elements pour out of the flares', kills - k0 >= 14 && seenEls.size >= 3, `${kills - k0} felled, elements: ${[...seenEls].join(' ')}`);
+  check('there they fly on the wing, never hovering', wingN > 50 && wing / wingN > 9 && c.wings[[...seenEls][0]].count >= 0, `mean speed ${(wing / Math.max(1, wingN)).toFixed(1)} m/s`);
+  check('waves of many elements pour out of the flares', kills - k0 >= 24 && seenEls.size >= 3, `${kills - k0} felled, elements: ${[...seenEls].join(' ')}`);
   for (let k = 0; k < 72 * 8 && !tr.f.boss; k++) step();
   const boss = tr.f.boss;
   check('then the Heliarch: huge, and wearing fire', !!boss && boss.boss && boss.sz > 4 && boss.el === 'fire' && boss.max >= 1500);

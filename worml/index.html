@@ -66,10 +66,14 @@
   .t-time { right: calc(18px + env(safe-area-inset-right)); top: calc(56px + env(safe-area-inset-top)); width: 62px; height: 62px; font-size: 11px; }
   .t-cycle { right: calc(90px + env(safe-area-inset-right)); top: calc(68px + env(safe-area-inset-top)); width: 38px; height: 38px; font-size: 17px; }
   /* the open area: a faint frame and a word when it is taking attack gestures */
-  #t-hint { position: absolute; left: 50%; top: calc(18% + env(safe-area-inset-top)); transform: translateX(-50%); pointer-events: none; font-size: 11px; font-weight: 700;
+  #t-hint { display: none; position: absolute; left: 50%; top: calc(18% + env(safe-area-inset-top)); transform: translateX(-50%); pointer-events: none; font-size: 11px; font-weight: 700;
     letter-spacing: 0.14em; color: rgba(255,255,255,0.55); padding: 5px 12px; border-radius: 999px; background: rgba(10,16,32,0.3); white-space: nowrap; }
   #t-hint[hidden] { display: none; }
   #t-hint.demo { color: #fff; background: rgba(122,212,255,0.45); }
+  .t-nova { left: 50%; bottom: calc(150px + env(safe-area-inset-bottom)); width: 64px; height: 64px; margin-left: -32px; font-size: 28px; --c: #ffe9a8;
+    background: rgba(255,233,168,0.25); box-shadow: inset 0 0 0 2px #ffe9a8, 0 0 22px rgba(255,233,168,0.7); animation: nova-pulse 0.9s ease-in-out infinite alternate; }
+  @keyframes nova-pulse { to { transform: scale(1.12); } }
+  #touch.demo-gesture::before { box-shadow: inset 0 0 0 2px #7ad4ff !important; }
   #touch.combat::before { content: ""; position: absolute; left: 4%; right: 4%; top: 12%; height: 36%; border-radius: 18px; pointer-events: none;
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12); }
   /* press-and-hold charge: a ring closes on your finger, and flashes when it is time to let go */
@@ -176,7 +180,7 @@
   <div id="t-left" class="t-stick"><div></div></div>
   <div id="t-right" class="t-stick"><div></div></div>
   <div id="t-buttons"></div>
-  <div id="t-hint" hidden>SWIPE TO STRIKE · TAP OR HOLD TO CAST</div>
+  <div id="t-hint" hidden></div>
   <div id="t-ring" hidden></div>
 </div>
 <div id="rotate-hint">Rotate to landscape for a wider view</div>

@@ -14,7 +14,7 @@ export const FLIGHT = {
   WALK: 7,
 };
 const SNAP = Math.PI / 6;
-const JUMP_TIME = 6.5;
+const JUMP_TIME = 2.4, JUMP_MAX = 9;
 
 const up = new THREE.Vector3(), rel = new THREE.Vector3(), tv = new THREE.Vector3();
 const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
@@ -31,7 +31,7 @@ export class Player {
     this.fall = 0; this.grounded = false; this.frozen = false;
     this.planet = planets[0]; this.alt = 0; this.speed = 0; this.vLimit = FLIGHT.V0;
     this.aimTarget = null; this.thrusting = false;
-    this.inside = false; this.ride = 0; this.jumpT = 0; this.leaping = false; this.eject = 0; this.arena = null;
+    this.inside = false; this.ride = 0; this.jumpT = 0; this.jumpSpent = 0; this.leaping = false; this.eject = 0; this.arena = null; this.dive = false;
   }
 
   // Bend the pointing direction toward a far world you're roughly aiming at,
@@ -82,7 +82,22 @@ export class Player {
   jump() {
     if (this.frozen) return false;
     if (this.inside) { this.ride = 1; return true; }
-    this.jumpT = JUMP_TIME; this.grounded = false; this.fall = 0;
+    this.jumpT = JUMP_TIME; this.jumpSpent = JUMP_TIME; this.grounded = false; this.fall = 0; this.dive = false;
+    return true;
+  }
+
+  // Press again while rising: the leap carries on climbing (each press adds as much again).
+  amp() {
+    if (this.jumpT <= 0 || this.jumpSpent >= JUMP_MAX) return false;
+    this.jumpT += JUMP_TIME; this.jumpSpent += JUMP_TIME;
+    return true;
+  }
+
+  // Press while flying: stop and drop straight back to the ground.
+  bail(input) {
+    if (this.inside || this.frozen) return false;
+    this.jumpT = 0; this.leaping = false; input.flyMode = false; this.dive = true;
+    this.vel.multiplyScalar(0.2);
     return true;
   }
 
@@ -201,7 +216,8 @@ export class Player {
     const hover = input.xr ? alt > 500 : input.flyMode;
     const maxFall = Math.max(34, vLimit * 0.6);
     if (flying || hover || inside || nearW <= 0) this.fall = 0;
-    else if (!this.grounded) this.fall = Math.min(this.fall + 11 * dt * Math.max(1, maxFall / 34), maxFall);
+    else if (!this.grounded) this.fall = this.dive ? Math.max(maxFall, 34) : Math.min(this.fall + 11 * dt * Math.max(1, maxFall / 34), maxFall);
+    if (this.grounded || flying || hover) this.dive = false;
     this.pos.addScaledVector(this.vel, dt).addScaledVector(up, -this.fall * dt);
 
     rel.copy(this.pos).sub(P.pos);

@@ -12,6 +12,7 @@
 const BUTTONS = [
   { id: 'time', label: 'TIME' },
   { id: 'cycle', label: '⟳' },
+  { id: 'nova', label: '✹' },
 ];
 const STICK_ZONE = 0.5;     // fraction of the screen height (from the bottom) that belongs to the sticks
 
@@ -57,7 +58,7 @@ export class TouchControls {
     this.left = new Stick(root.querySelector('#t-left'), t.move);
     this.right = new Stick(root.querySelector('#t-right'), t.look);
     this.ring = root.querySelector('#t-ring');
-    this.hint = root.querySelector('#t-hint');
+    this.hint = root.querySelector('#t-hint'); this.leaping = false;
     this.btn = {};
     const cluster = root.querySelector('#t-buttons');
     for (const b of BUTTONS) {
@@ -67,8 +68,11 @@ export class TouchControls {
       this.btn[b.id] = el;
       el.addEventListener('pointerdown', (e) => {
         e.preventDefault(); e.stopPropagation();
-        t[b.id] = true; el.classList.add('on'); setTimeout(() => el.classList.remove('on'), 160);
+        try { el.setPointerCapture(e.pointerId); } catch { /* fine */ }
+        t[b.id] = true; el.classList.add('on');
+        if (b.id === 'time') t.timeHeld = true; else setTimeout(() => el.classList.remove('on'), 160);
       });
+      if (b.id === 'time') for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(ev, () => { t.timeHeld = false; el.classList.remove('on'); });
     }
     this.free = new Map();       // pointers in the open area: look-drags or gestures
     this.lastTap = 0; this.lastTapX = 0;
@@ -81,9 +85,11 @@ export class TouchControls {
       if (low) {
         const s = e.clientX < innerWidth / 2 ? this.left : this.right;
         if (s === this.right) {
-          // double tap on the look side: super leap
+          // double tap on the look side: leap. While rising, one more tap carries the leap higher;
+          // a double tap once you are flying drops you back to the ground.
           const now = e.timeStamp;      // when the finger landed, not when a busy frame got round to it
-          if (now - this.lastTap < 320 && Math.abs(e.clientX - this.lastTapX) < 90) { t.jump = true; this.lastTap = 0; } else { this.lastTap = now; this.lastTapX = e.clientX; }
+          if (this.leaping) { t.jump = true; this.lastTap = 0; }
+          else if (now - this.lastTap < 320 && Math.abs(e.clientX - this.lastTapX) < 90) { t.jump = true; this.lastTap = 0; } else { this.lastTap = now; this.lastTapX = e.clientX; }
         }
         if (s.id === null) { s.start(e); return; }
       }
@@ -141,10 +147,10 @@ export class TouchControls {
       const k = Math.min(1, t.holdT / s.w0);
       this.ring.style.setProperty('--k', k.toFixed(3));
       this.ring.style.setProperty('--c', s.castCss || '#cfe0ff');
-      this.ring.classList.toggle('perfect', t.holdT >= s.w0 && t.holdT <= s.w1);
-      this.ring.classList.toggle('over', t.holdT > s.w1);
+      this.ring.classList.toggle('perfect', t.holdT >= s.w0);
     }
-    this.hint.hidden = !t.combat;
+    this.leaping = !!s.leaping;
+    b.nova.hidden = !s.nova;
     this.root.classList.toggle('combat', t.combat);
     b.time.hidden = !s.weapon;
     b.cycle.hidden = !s.weapon || !s.weapon.many;
@@ -160,6 +166,7 @@ export class TouchControls {
     for (const id in this.btn) this.btn[id].classList.toggle('demo', ids.includes(id));
     this.left.el.classList.toggle('demo', ids.includes('stick'));
     this.right.el.classList.toggle('demo', ids.includes('look') || ids.includes('jump'));
-    this.hint.classList.toggle('demo', ids.includes('cast') || ids.includes('slash'));
+    this.root.classList.toggle('demo-gesture', ids.includes('cast') || ids.includes('slash'));
+    this.btn.nova.classList.toggle('demo', ids.includes('nova'));
   }
 }

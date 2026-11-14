@@ -62,7 +62,7 @@ if (want('phone')) {
   await page.evaluate(() => { const w = window.worml; w.game.grant(6); w.dev.summon(1); });
   await page.waitForFunction(() => window.worml.input.touch.combat, null, { timeout: 60000 }).catch(() => {});
   await wait(800);
-  check('phone: a guardian near turns the open area into attack gestures', (await state()).combat && await page.isVisible('#t-hint'));
+  check('phone: a guardian near turns the open area into attack gestures', (await state()).combat && await page.evaluate(() => document.getElementById('touch').classList.contains('combat')));
   const y2 = (await state()).yaw;
   await touch('touchStart', [{ x: vp.width * 0.3, y: vp.height * 0.3, id: 4 }]);
   for (let i = 1; i <= 6; i++) await touch('touchMove', [{ x: vp.width * 0.3 + i * 45, y: vp.height * 0.3 - i * 6, id: 4 }]);
@@ -81,9 +81,10 @@ if (want('phone')) {
     tick();
   }));
   await touch('touchEnd', []);
-  await page.waitForFunction(() => window.worml.game.lastCast === 'perfect', null, { timeout: 30000 }).catch(() => {});
+  await page.waitForFunction(() => window.worml.game.lastCast === 'burst', null, { timeout: 30000 }).catch(() => {});
   s = await state();
-  check('phone: press and release on the flash is a perfect cast', ringOn && s.last === 'perfect' && s.carried === 28, `ring=${ringOn} last=${s.last}`);
+  check('phone: press until the ring closes, release: a burst', ringOn && s.last === 'burst' && s.carried <= 28, `ring=${ringOn} last=${s.last} carried=${s.carried}`);
+  check('phone: no guidance text on screen', await page.evaluate(() => !window.worml.game.hud.guides && getComputedStyle(document.getElementById('t-hint')).display === 'none'));
   await page.evaluate(() => { const w = window.worml; w.game.combat.clear(() => true); w.game.health = 100; });
   await wait(1500);
   // double tap the look side: super leap, and flight follows
@@ -146,7 +147,7 @@ if (want('desktop')) {
       await page.click(`[data-place="${pl}"]`);
       await page.waitForTimeout(60);
       const r = await page.evaluate(() => { const p = window.worml.game.player; return { id: p.planet.def.id, alt: p.alt, ok: Number.isFinite(p.pos.x + p.pos.y + p.pos.z) && Number.isFinite(window.worml.rig.quaternion.x) }; });
-      const global = ['sun', 'system', 'midway'].includes(pl);
+      const global = ['sun', 'system', 'midway', 'arena'].includes(pl);
       if (!r.ok || (!global && r.id !== w)) bad.push(`${w}/${pl}:${JSON.stringify(r)}`);
     }
   }
@@ -164,9 +165,12 @@ if (want('desktop')) {
   check('desktop: spell buttons force the cast element', a.force === 'fire' && a.fire === 12);
   await page.click('[data-cast="perfect"]'); await page.waitForTimeout(150);
   a = await ars();
-  check('desktop: perfect cast on demand', a.last === 'perfect' && a.fire === 11, JSON.stringify(a));
-  await page.click('[data-cast="quick"]'); await page.click('[data-cast="over"]');
-  check('desktop: quick and overheld casts on demand', (await ars()).fire === 9);
+  check('desktop: burst on demand', a.last === 'burst' && a.fire <= 11, JSON.stringify(a));
+  await page.click('[data-cast="quick"]'); await page.waitForTimeout(150);
+  check('desktop: quick cast on demand', (await ars()).last === 'quick');
+  await page.click('[data-cast="nova"]');
+  await page.waitForFunction(() => window.worml.game.fury === 0, null, { timeout: 30000 }).catch(() => {});
+  check('desktop: blast on demand', await page.evaluate(() => window.worml.game.fury === 0));
   await page.click('[data-spell="auto"]');
   check('desktop: Auto clears the forced element', (await ars()).force === null);
   await page.click('[data-relic="pearls"]'); await page.waitForTimeout(100);

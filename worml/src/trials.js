@@ -19,7 +19,7 @@ import { mulberry32 } from './noise.js';
 const Y = new THREE.Vector3(0, 1, 0);
 const m4 = new THREE.Matrix4(), q1 = new THREE.Quaternion(), v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3(), sc = new THREE.Vector3(), col = new THREE.Color();
 const MAXH = 14, FIVE = ['water', 'fire', 'metal', 'wood', 'earth'];
-const WAVES = { water: [1, 2, 2], fire: [2, 3, 3], metal: [2, 3, 3], wood: [2, 3, 4], earth: [2, 2, 3], magic: [2, 3, 4] };
+const WAVES = { water: [3, 4, 5], fire: [4, 6, 7], metal: [4, 5, 7], wood: [5, 6, 8], earth: [4, 5, 6], magic: [5, 6, 8] };
 const BOSS_ORDER = ['fire', 'metal', 'wood', 'earth', 'water'];
 
 // Where the finale is fought: on the Thalassa side of the Sun, well clear of its surface.
@@ -79,8 +79,8 @@ export class Trials {
   }
 
   // A telegraphed eruption. pos solar, up unit; bursts after `warn` seconds.
-  hazard(pos, up, rgb, r = 4.5, warn = 1.25, dmg = 13) {
-    if (this.hazards.length < MAXH) this.hazards.push({ pos: pos.clone(), up: up.clone(), rgb, r, warn, dmg, t: 0, burst: false });
+  hazard(pos, up, rgb, r = 4.5, warn = 1.25, dmg = 13, tall = 16) {
+    if (this.hazards.length < MAXH) this.hazards.push({ pos: pos.clone(), up: up.clone(), rgb, r, warn, dmg, tall, t: 0, burst: false });
   }
 
   // The Rewinder un-happens eruptions near its beam.
@@ -90,6 +90,12 @@ export class Trials {
       v1.copy(h.pos).sub(origin); const t = v1.dot(dir);
       if (t > 0 && t < range && v1.addScaledVector(dir, -t).length() < 14 && !h.burst) { h.t = 99; h.burst = true; n++; }
     }
+    return n;
+  }
+
+  undoAround(center, r) {
+    let n = 0;
+    for (const h of this.hazards) if (!h.burst && h.pos.distanceTo(center) < r) { h.t = 99; h.burst = true; n++; }
     return n;
   }
 
@@ -114,7 +120,7 @@ export class Trials {
       if (dist < 240 && dist > 60) g.tell('trialnear', 90, T.name, `${E.label} is won here, not found. Step in.`, 5, E.css);
       if (onSite) {
         this.phase = 'rest'; this.wave = -1; this.restT = 1.2; this.hazT = 3;
-        g.hud.say(T.name, T.intro, 5, E.css);
+        g.hud.note(T.name, E.css);
         g.hud.say('Swipe, swing or cast', `${g.labels().slash} to strike for free. ${g.labels().cast} spends essence and hits harder.`, 7);
         g.audio.tone(98, 1.2, 'sawtooth', 0.12, 0, 0.6);
       }
@@ -133,7 +139,7 @@ export class Trials {
           // mastered
           s.trial[def.id] = true; s.inv[el] = g.cap;
           this.phase = 'idle'; this.hazards.length = 0;
-          g.hud.say(`${E.label} mastered`, `The font is awake: your ${E.label} is full, and it will refill you here whenever you return`, 8, E.css);
+          g.hud.note(`${E.label} mastered`, E.css, 4);
           g.audio.unlock(); g.hud.poke(6); g.save();
           g.combat.spark(v1.copy(P.pos).add(site.pos).addScaledVector(site.up, 6), E.rgb, 30, 22);
           return;
@@ -145,7 +151,7 @@ export class Trials {
     }
     // ---- fight: guardians rise out of the pool one after another
     if (this.queue > 0 && (this.spawnT -= dt) <= 0) {
-      this.spawnT = 0.8; this.queue--;
+      this.spawnT = 0.45; this.queue--;
       const a = this.rnd() * Math.PI * 2, r = 16 + this.rnd() * 22;
       v1.copy(site.pos).addScaledVector(site.t1, Math.cos(a) * r).addScaledVector(site.t2, Math.sin(a) * r).normalize();
       const pos = v1.clone().multiplyScalar(def.radius + groundHeight(def, v1.x, v1.y, v1.z)).add(P.pos);
@@ -183,7 +189,7 @@ export class Trials {
     if (f.phase === 'idle') {
       if (d < 260) {
         f.phase = 'rest'; f.wave = -1; f.restT = 2.5; f.hazT = 4;
-        g.hud.say('The star wakes', 'Guardians of every element pour out of the flares. Braziers round the ring refill each element.', 8, '#ffd27a');
+        g.hud.note('The star wakes', '#ffd27a', 4);
         g.audio.warp();
       }
       return;
@@ -197,24 +203,24 @@ export class Trials {
     if ((f.hazT -= dt) <= 0) {
       f.hazT = 2.2 + this.rnd() * 1.6;
       v1.copy(g.headSolar).addScaledVector(pl.vel, 0.8).add(v2.set(this.rnd() - 0.5, this.rnd() - 0.5, this.rnd() - 0.5).multiplyScalar(8));
-      this.hazard(v1, v2.copy(v1).sub(pl.pos).cross(this.up).normalize(), [1.0, 0.75, 0.35], 6, 1.3, 14);
+      this.hazard(v1, v2.copy(v1).sub(pl.pos).cross(this.up).normalize(), [1.0, 0.75, 0.35], 6, 1.3, 14, 0);     // in open space a flare is a ring and a burst, not a column across your face
     }
     if (f.phase === 'rest') {
       if ((f.restT -= dt) > 0) return;
       f.wave++;
       if (f.wave < 2) {
-        f.phase = 'fight'; f.queue = f.wave === 0 ? 6 : 8; f.spawnT = 0.3;
+        f.phase = 'fight'; f.queue = f.wave === 0 ? 12 : 16; f.spawnT = 0.3;
         g.hud.say(f.wave === 0 ? 'First flare' : 'Second flare', 'Aim for what each is weak to: it is chosen for you if you carry it', 4, '#ffd27a');
       } else {
         f.phase = 'boss'; f.shift = 0; f.shiftT = 11; f.addT = 9;
-        f.boss = spawn(BOSS_ORDER[0], { boss: true, sz: 4.2, hp: 1500, dmg: 11, striker: false });
+        f.boss = spawn(BOSS_ORDER[0], { boss: true, sz: 4.2, hp: 2600, dmg: 11, striker: false });
         f.boss.pos.copy(ARENA).addScaledVector(this.up, 60);
         this.announce(f.boss);
       }
       return;
     }
     if (f.phase === 'fight') {
-      if (f.queue > 0 && (f.spawnT -= dt) <= 0) { f.spawnT = 0.7; f.queue--; spawn(['fire', 'metal', 'wood', 'earth', 'water', 'magic'][Math.floor(this.rnd() * 6)]); }
+      if (f.queue > 0 && (f.spawnT -= dt) <= 0) { f.spawnT = 0.4; f.queue--; spawn(['fire', 'metal', 'wood', 'earth', 'water', 'magic'][Math.floor(this.rnd() * 6)]); }
       if (f.queue === 0 && alive() === 0) { f.phase = 'rest'; f.restT = 3; }
       return;
     }
@@ -224,7 +230,7 @@ export class Trials {
       c.clear((e) => e.tag === 'finale' && !e.boss);
       f.phase = 'done'; s.finale = true; this.hazards.length = 0;
       const t = Math.round(s.playTime), mm = Math.floor(t / 60), ss = String(t % 60).padStart(2, '0');
-      g.hud.say('WORML COMPLETE', `The star is quiet and every world is linked. ${mm}:${ss}`, 20, '#ffe9a8');
+      g.hud.note(`WORML COMPLETE · ${mm}:${ss}`, '#ffe9a8', 14);
       g.audio.win();
       for (let i = 0; i < 6; i++) c.spark(v1.copy(ARENA).add(v2.set(this.rnd() - 0.5, this.rnd() - 0.5, this.rnd() - 0.5).multiplyScalar(120)), ELEMENTS[FIVE[i % 5]].rgb, 10, 30);
       g.save();
@@ -238,11 +244,12 @@ export class Trials {
       c.spark(boss.pos, ELEMENTS[boss.el].rgb, 20, 30);
       this.announce(boss);
     }
-    if ((f.addT -= dt) <= 0) { f.addT = 12; if (alive() < 5) { spawn(boss.el); spawn(boss.el); } }
+    if ((f.addT -= dt) <= 0) { f.addT = 8; if (alive() < 9) for (let i = 0; i < 4; i++) spawn(boss.el); }
   }
 
   announce(boss) {
     const w = WEAK_TO[boss.el], g = this.game;
+    g.hud.note(`The Heliarch: ${ELEMENTS[boss.el].label}`, ELEMENTS[boss.el].css);
     g.hud.say(`The Heliarch burns as ${ELEMENTS[boss.el].label}`, `${ELEMENTS[w].label} overcomes it${g.state.inv[w] ? '' : ': rekindle it at a brazier'}`, 5, ELEMENTS[boss.el].css);
     g.audio.tone(82, 1.0, 'sawtooth', 0.14, 0, 0.5);
   }
@@ -269,7 +276,7 @@ export class Trials {
       m4.compose(v1, q1, sc.setScalar(h.burst ? h.r * (1 + (h.t - h.warn) * 2) : h.r * (1.6 - 0.6 * k)));
       this.rings.setMatrixAt(n, m4); this.rings.setColorAt(n, col.setRGB(...h.rgb).multiplyScalar(h.burst ? Math.max(0, 1 - (h.t - h.warn) * 2.5) : 0.4 + k));
       const e = h.burst ? Math.max(0, 1 - (h.t - h.warn) / 0.5) : 0;
-      m4.compose(v1, q1, sc.set(h.r * 0.5 * e + 0.001, 16 * e + 0.001, h.r * 0.5 * e + 0.001));
+      m4.compose(v1, q1, sc.set(h.r * 0.5 * e + 0.001, h.tall * e + 0.001, h.r * 0.5 * e + 0.001).multiplyScalar(h.tall ? 1 : 0));
       this.cols.setMatrixAt(n, m4); this.cols.setColorAt(n, col.setRGB(...h.rgb));
       n++;
     }

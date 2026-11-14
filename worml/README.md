@@ -26,17 +26,22 @@ Then open `http://localhost:8080/` in the Quest Browser.
 | --- | --- | --- | --- |
 | Walk / strafe | Left stick | `W A S D` | Lower-left of the screen (a stick appears under your thumb) |
 | Look / turn | Head; right stick snap-turns | Mouse | Lower-right of the screen |
-| Super leap | `A` or `X` | `Space` | **Double-tap** the look side |
+| Leap | `A` or `X` | `Space` | **Double-tap** the look side |
+| Leap higher | the same again while rising | the same again while rising | one more tap while rising |
+| Bail out | release the triggers | `Space` while flying | double-tap the look side while flying |
 | Fly | Trigger: fly where that hand points | `W`, once a leap has put you in the air | Left stick, once a leap has put you in the air |
 | Blade (free) | **Swing a controller** | `V` or middle click | **Swipe** across the open upper screen |
-| Cast (spends essence) | Hold right grip to charge, release to throw | Hold left click (or `X`), release | **Tap** (quick) or **press and release** (charged) on the open upper screen |
-| Use the time relic | Left grip, aimed with that hand | `E` or right click | **TIME** (appears once you own one) |
+| Cast (spends essence) | Right grip: tap, or hold to full charge | Left click (or `X`): tap, or hold | **Tap** (quick) or **press until the ring closes** (burst) on the open upper screen |
+| Blast (charged by kills) | Click the right stick | `G` | **✹**, which appears when it is ready |
+| Use the time relic | Left grip (hold and release for the Rewinder) | `E` or right click | The relic button (appears once you own one) |
 | Switch relic | `B` | `Q`, wheel, `1`-`4` | **⟳** |
 | Objectives | `Y` (on the left wrist) | `H` | **◎** |
 
-On a phone there are no move, fly, leap, cast or gather buttons. The lower half of the screen is two floating sticks; the upper half is open. With nothing to fight, dragging there looks around. When a guardian or a seal is near, it takes attack gestures instead (a faint frame and a line of text appear). A ring closes on your finger while you press: let go as it flashes white for a perfect cast.
+On a phone there are no move, fly, leap, cast or gather buttons. The lower half of the screen is two floating sticks; the upper half is open. With nothing to fight, dragging there looks around. When a guardian or a seal is near, it takes attack gestures instead (a faint frame appears). A ring closes on your finger while you press: once it is closed and white, let go for a burst.
 
-**Flight looks after itself** on flat screens. A leap puts you in the air and flying; fly down to within a few metres of the ground and you land. Inside a world you always fly. (In VR the triggers fly, as before.)
+**No guiding messages.** Hints, tutorials and prompts are off. The only text that appears is a one-line note when something happens (a place reached, an element mastered, a relic found). The objectives panel is there when you ask for it. The dev dashboard has a switch to turn guidance back on.
+
+**Leaping and flight.** A plain leap is modest: a couple of hundred metres. Press again while you are still rising and it keeps climbing (each press adds as much again, up to several kilometres). A leap leaves you flying; fly down to within a few metres of the ground and you land, or press leap again while flying to bail out and drop straight back. Inside a world you always fly. (In VR the triggers fly, as before.)
 
 ## The game
 
@@ -48,9 +53,14 @@ Each world has exactly three places, all within a short flight of each other, jo
 
 **Elements are won, not found.** Each trial ground is a ringed pool of the world's own liquid with a dormant font on an islet: the Tidepool (water) on Thalassa, the Crucible (a lake of lava) on Pyra, the Foundry (quicksilver) on Ferrum, the Heartwood mire on Sylva, the Quarry pit on dry Petra, the Rift on Arcana. Step in and guardians rise out of it in three waves while the ground erupts under you: a ring closes on a spot, then a geyser, fire jet or rockfall bursts there, so you fight on the move. Clear the waves and the font wakes: your element fills to 12, and from then on standing by that font refills it.
 
-**Two ways to strike.** A **blade** (swing a controller, swipe the screen) is free, short-ranged, and cuts every guardian it crosses; drawn through a head it hits far harder. It carries the most useful element you hold without spending it, so you can always fight, even with nothing. A **cast** spends one essence, reaches far and hits harder: hold to charge and release inside the quarter-second window after the flash for a perfect cast (about three times the force of a tap, twice the speed, punches through once, counts double on a seal). A head hit is 1.6x.
+**Four ways to strike.**
 
-**Guardians** walk on jointed legs. They rise out of their element, run you down, crouch and pounce, rear up to spit, and may spring aside from a bolt they see coming. They only take to the air if you go well above them. They are weak to the element that overcomes theirs (water douses fire, fire melts metal, metal cuts wood, wood breaks earth, earth dams water), and the right element is chosen for you if you carry it. If you fly away, up to six chase you through open space; only a wormhole shakes them.
+- **Blade** (swing a controller, swipe the screen): free, short-ranged, cuts every guardian it crosses, far harder through a head. It carries your most useful element without spending it, so you can always fight.
+- **Quick cast** (tap): one essence, a fast bolt. A guardian may sidestep it or take it on its guard for a third of the damage.
+- **Burst** (hold to full charge, about 0.7 s, then let go): two essence. A surge of the element that hunts down the guardian you are aiming at and destroys it. Water runs on like a river to the next two; metal lances on to one more; fire bursts across everything nearby; wood roots and earth staggers whatever stands round the impact. With no guardian to go after it flies straight and counts double on a seal.
+- **Blast** (charged by five kills): strikes everything within 17 m of you at once. A ring on the vitals strip fills as you kill.
+
+**Guardians** come in numbers and fall quickly: trials send waves of three to eight, the finale a dozen or more at a time. They walk on jointed legs, rise out of their element, run you down, crouch and pounce, rear up to spit, and may spring aside from a bolt or brace against it. If you go well above them (and at the finale) they take wing: they never hover, but come in on a line beside you, strike as they pass, pull away and bank round again. They are weak to the element that overcomes theirs (water douses fire, fire melts metal, metal cuts wood, wood breaks earth, earth dams water), and the right element is chosen for you if you carry it. If you fly away, up to six chase you through open space; only a wormhole shakes them.
 
 **Health.** You have 100. After five seconds without being hit you mend quickly. At zero you are unmade: half your essence scatters and you reform at the wellhead of the world you were on.
 
@@ -72,13 +82,13 @@ Step into an open well and the shaft carries you down. A gate's **front face lea
 | Relic | Form | World | What it does |
 | --- | --- | --- | --- |
 | Stillwater Pearls | pills | Thalassa | **Slows** the world to a fifth for six seconds; you and your own attacks are unaffected. |
-| The Rewinder | gun | Pyra | **Reverses**: a guardian retraces its path and is pacified; an eruption about to burst un-happens. |
+| The Rewinder | gun | Pyra | **Reverses**: press and every guardian near you is marked where it stands (gold rings); let go and each is hauled back to its mark and stunned, however close it had come. Their bolts in flight are unmade and eruptions about to burst un-happen. |
 | Tempered Mainspring | coil (passive) | Ferrum | Your other relics recharge twice as fast. |
 | Quickening Seeds | grenade | Sylva | **Speeds** time where it lands: a tree grows in a breath and its roots seize guardians; beside a woken font it fruits with that element. |
 | Mantle of the Held Moment | cape | Petra | **Freezes** the world and leaves an echo of you that draws fire and casts when you cast; use it again to step back into it. |
 | Prism of Hours | prism (passive) | Arcana | Slow and freeze last longer, with a pearl and a seed to spare. |
 
-**The finale.** When all six worlds are linked, the star wakes. A ring of stone hangs before the Sun (a marker leads you there, and you slow to a fighting pace as you reach it). Guardians of every element pour out of the flares in two waves while solar flares burst around you; five braziers on the ring each refill one element when you fly through them. Then the Heliarch: four times the size of a guardian, calling reinforcements, and wearing one element after another, so it must be answered with each overcoming element in turn. Felling it completes the game and shows your time.
+**The finale.** When all six worlds are linked, the star wakes. A ring of stone hangs before the Sun (a marker leads you there, and you slow to a fighting pace as you reach it). Winged guardians of every element pour out of the flares in two waves (a dozen, then sixteen) while solar flares burst around you; five braziers on the ring each refill one element when you fly through them. Then the Heliarch: four times the size of a guardian, calling reinforcements, and wearing one element after another, so it must be answered with each overcoming element in turn. Felling it completes the game and shows your time.
 
 **Length.** The run is built to take about 20 to 30 minutes: five short trials, five seals, the flights between, and the finale. That figure is an estimate from the pacing of each part, not a measured playthrough by a person.
 
